@@ -104,7 +104,8 @@ st.markdown("""
 @st.cache_resource
 def get_db_engine():
     """Create database connection."""
-    db_url = os.getenv("DATABASE_URL")
+    # Try Streamlit secrets first (for Streamlit Cloud), then env var (for local)
+    db_url = st.secrets.get("DATABASE_URL") if "DATABASE_URL" in st.secrets else os.getenv("DATABASE_URL")
     
     # FALLBACK: Use local SQLite if no real DB configured
     if not db_url:
