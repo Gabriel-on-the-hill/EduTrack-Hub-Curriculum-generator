@@ -105,11 +105,24 @@ class GeminiClient:
     """
     
     def __init__(self) -> None:
-        """Initialize client with API key from environment."""
-        api_key = os.getenv("GOOGLE_AI_API_KEY")
+        """Initialize client with API key from environment or Streamlit secrets."""
+        # Try to get API key from multiple sources
+        api_key = None
+        
+        # 1. Try Streamlit secrets first (for Streamlit Cloud)
+        try:
+            import streamlit as st
+            api_key = st.secrets.get("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_AI_API_KEY")
+        except Exception:
+            pass  # Not running in Streamlit context
+        
+        # 2. Fallback to environment variables
+        if not api_key:
+            api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_AI_API_KEY")
+        
         if not api_key:
             logger.warning(
-                "GOOGLE_AI_API_KEY not set. "
+                "GOOGLE_API_KEY not set. "
                 "Gemini API calls will fail in production."
             )
             self._configured = False
