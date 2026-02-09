@@ -7,6 +7,7 @@ Run with: streamlit run app.py
 
 import streamlit as st
 import os
+import time
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
