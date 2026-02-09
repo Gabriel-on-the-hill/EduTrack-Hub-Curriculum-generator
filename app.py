@@ -285,14 +285,11 @@ def get_harness():
     from src.production.errors import GroundingViolationError, HallucinationBlockError
     
     # Create Read-Only Session Factory
-    # 1. We start with a standard sessionmaker
-    Session = sessionmaker(bind=engine)
+    # 1. We start with a sessionmaker configured for ReadOnlySession
+    ReadOnlySessionFactory = sessionmaker(bind=engine, class_=ReadOnlySession)
     
-    # 2. We wrap it/enforce it opens in Read-Only mode
-    # For this demo, we'll instantiate a session and pass it.
-    # In a real app, harness probably takes a factory or manages its own scope.
-    # Here we hack it slightly for Streamlit's single-threaded simple model:
-    session = Session()
+    # 2. Instantiate the read-only session
+    session = ReadOnlySessionFactory()
     
     # 3. Enforce SQL-level Read-Only (Crucial Phase 5 Invariant)
     try:
