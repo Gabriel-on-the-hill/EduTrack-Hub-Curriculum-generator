@@ -352,7 +352,7 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
             
             # Build provenance for governance enforcement
             provenance = {
-                "curriculum_id": curriculum_id,
+                "curriculum_id": str(curriculum_id),
                 "source_list": [{"url": "https://edutrack.demo", "authority": "EduTrack", "fetch_date": "2026-02-15"}],
                 "retrieval_timestamp": "2026-02-15T00:00:00Z",
                 "extraction_confidence": 0.95,
