@@ -1,11 +1,15 @@
 """
-Gemini API Client (Blueprint Section 15.1)
+AI Client (Blueprint Section 15.1)
 
-This module provides a robust wrapper around the Gemini API with:
+This module provides a robust wrapper around AI providers with:
 - Rate limiting (respects free tier limits)
 - Structured output enforcement
 - Retry logic with exponential backoff
 - Cost tracking
+
+Supported Providers (via AI_PROVIDER env var):
+- "gemini"      (default) — Google Gemini API
+- "openrouter"  — OpenRouter.ai (free models available)
 
 Blueprint Section 15.1 Configuration:
 - Primary: Gemini 2.0 Flash (low/medium tasks)
@@ -14,14 +18,13 @@ Blueprint Section 15.1 Configuration:
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
 from enum import Enum
 from typing import Any, TypeVar
 
-import google.generativeai as genai
-from google.generativeai.types import GenerationConfig
 from pydantic import BaseModel
 
 from src.schemas.base import FallbackTier
@@ -35,6 +38,13 @@ class GeminiModel(str, Enum):
     """Available Gemini models per Blueprint Section 15.1."""
     FLASH = "gemini-2.0-flash"  # Primary: Low/Medium tasks
     PRO = "gemini-1.5-pro"      # Escalation: High/Critical tasks
+
+
+# Mapping from GeminiModel to OpenRouter model identifiers
+OPENROUTER_MODEL_MAP: dict[str, str] = {
+    GeminiModel.FLASH: "google/gemma-3-27b-it:free",
+    GeminiModel.PRO: "google/gemma-3-27b-it:free",
+}
 
 
 class RateLimitConfig:
@@ -91,6 +101,144 @@ class TokenBucket:
             await asyncio.sleep(wait_time)
 
 
+# =============================================================================
+# OPENROUTER BACKEND
+# =============================================================================
+
+class OpenRouterClient:
+    """
+    OpenRouter.ai client — drop-in alternative to Gemini.
+    
+    Uses the OpenAI-compatible API with free models.
+    Sign up at https://openrouter.ai to get a free API key.
+    """
+    
+    def __init__(self) -> None:
+        api_key = None
+        
+        # Try Streamlit secrets
+        try:
+            import streamlit as st
+            api_key = st.secrets.get("OPENROUTER_API_KEY")
+        except Exception:
+            pass
+        
+        # Fallback to env
+        if not api_key:
+            api_key = os.getenv("OPENROUTER_API_KEY")
+        
+        if not api_key:
+            raise ValueError(
+                "OPENROUTER_API_KEY not set. "
+                "Get a free key at https://openrouter.ai/keys"
+            )
+        
+        from openai import OpenAI
+        self._client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+        )
+        self._configured = True
+        self._daily_calls: dict[str, int] = {
+            GeminiModel.FLASH: 0,
+            GeminiModel.PRO: 0,
+        }
+        self._total_tokens = 0
+        self._estimated_cost = 0.0
+    
+    def _resolve_model(self, model: GeminiModel) -> str:
+        """Map GeminiModel enum to an OpenRouter model string."""
+        return OPENROUTER_MODEL_MAP.get(model, "google/gemma-3-27b-it:free")
+    
+    async def generate_structured(
+        self,
+        prompt: str,
+        response_schema: type[T],
+        model: GeminiModel = GeminiModel.FLASH,
+        temperature: float = 0.1,
+        max_retries: int = 3,
+    ) -> T:
+        """Generate structured output validated against a Pydantic schema."""
+        or_model = self._resolve_model(model)
+        json_schema = response_schema.model_json_schema()
+        
+        system_msg = (
+            "You are a precise curriculum generation assistant. "
+            "You MUST respond with valid JSON matching this schema:\n"
+            f"{json.dumps(json_schema, indent=2)}\n"
+            "Respond ONLY with the JSON object, no extra text."
+        )
+        
+        last_error: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                response = await asyncio.to_thread(
+                    self._client.chat.completions.create,
+                    model=or_model,
+                    messages=[
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=temperature,
+                    response_format={"type": "json_object"},
+                )
+                
+                self._daily_calls[model] += 1
+                text = response.choices[0].message.content or ""
+                data = json.loads(text)
+                return response_schema.model_validate(data)
+                
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"OpenRouter API error (attempt {attempt + 1}/{max_retries}): {e}"
+                )
+                await asyncio.sleep(2 ** attempt)
+        
+        raise ValueError(
+            f"Failed to generate structured output after {max_retries} attempts: "
+            f"{last_error}"
+        )
+    
+    async def generate_text(
+        self,
+        prompt: str,
+        model: GeminiModel = GeminiModel.FLASH,
+        temperature: float = 0.7,
+    ) -> str:
+        """Generate plain text output."""
+        or_model = self._resolve_model(model)
+        
+        response = await asyncio.to_thread(
+            self._client.chat.completions.create,
+            model=or_model,
+            messages=[
+                {"role": "user", "content": prompt},
+            ],
+            temperature=temperature,
+        )
+        
+        self._daily_calls[model] += 1
+        return response.choices[0].message.content or ""
+    
+    def select_model_for_tier(self, tier: FallbackTier) -> GeminiModel:
+        if tier == FallbackTier.TIER_0:
+            return GeminiModel.FLASH
+        return GeminiModel.PRO
+    
+    def get_usage_stats(self) -> dict[str, Any]:
+        return {
+            "daily_calls": dict(self._daily_calls),
+            "total_tokens": self._total_tokens,
+            "estimated_cost_usd": self._estimated_cost,
+            "provider": "openrouter",
+        }
+
+
+# =============================================================================
+# GEMINI BACKEND (original)
+# =============================================================================
+
 class GeminiClient:
     """
     Robust Gemini API client with rate limiting and structured output.
@@ -106,6 +254,11 @@ class GeminiClient:
     
     def __init__(self) -> None:
         """Initialize client with API key from environment or Streamlit secrets."""
+        import google.generativeai as genai
+        from google.generativeai.types import GenerationConfig
+        self._genai = genai
+        self._GenerationConfig = GenerationConfig
+        
         # Try to get API key from multiple sources
         api_key = None
         
@@ -227,14 +380,14 @@ class GeminiClient:
         json_schema = response_schema.model_json_schema()
         
         # Generation config with structured output
-        generation_config = GenerationConfig(
+        generation_config = self._GenerationConfig(
             temperature=temperature,
             response_mime_type="application/json",
             response_schema=json_schema,
         )
         
         # Create model instance
-        gemini_model = genai.GenerativeModel(
+        gemini_model = self._genai.GenerativeModel(
             model_name=model.value,
             generation_config=generation_config,
         )
@@ -252,7 +405,6 @@ class GeminiClient:
                 
                 # Parse and validate response
                 if response.text:
-                    import json
                     data = json.loads(response.text)
                     return response_schema.model_validate(data)
                 
@@ -285,9 +437,9 @@ class GeminiClient:
         
         await self._get_limiter(model).acquire()
         
-        gemini_model = genai.GenerativeModel(
+        gemini_model = self._genai.GenerativeModel(
             model_name=model.value,
-            generation_config=GenerationConfig(temperature=temperature),
+            generation_config=self._GenerationConfig(temperature=temperature),
         )
         
         response = await asyncio.to_thread(
@@ -313,16 +465,49 @@ class GeminiClient:
             "daily_calls": dict(self._daily_calls),
             "total_tokens": self._total_tokens,
             "estimated_cost_usd": self._estimated_cost,
+            "provider": "gemini",
         }
 
 
+# =============================================================================
+# CLIENT FACTORY
+# =============================================================================
+
 # Global client instance
-_client: GeminiClient | None = None
+_client: GeminiClient | OpenRouterClient | None = None
 
 
-def get_gemini_client() -> GeminiClient:
-    """Get or create the global Gemini client."""
+def get_gemini_client() -> GeminiClient | OpenRouterClient:
+    """
+    Get or create the global AI client.
+    
+    Selects provider based on AI_PROVIDER setting:
+    - "openrouter" → OpenRouterClient (free models via openrouter.ai)
+    - "gemini" (default) → GeminiClient (Google Gemini API)
+    
+    Checks Streamlit secrets first, then env vars.
+    """
     global _client
     if _client is None:
-        _client = GeminiClient()
+        provider = None
+        
+        # Check Streamlit secrets first
+        try:
+            import streamlit as st
+            provider = st.secrets.get("AI_PROVIDER")
+        except Exception:
+            pass
+        
+        # Fallback to env var
+        if not provider:
+            provider = os.getenv("AI_PROVIDER", "gemini")
+        
+        provider = provider.lower().strip()
+        
+        if provider == "openrouter":
+            logger.info("Using OpenRouter AI provider")
+            _client = OpenRouterClient()
+        else:
+            logger.info("Using Gemini AI provider")
+            _client = GeminiClient()
     return _client
