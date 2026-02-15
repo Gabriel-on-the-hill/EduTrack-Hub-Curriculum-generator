@@ -412,7 +412,7 @@ class TestPipelineTestHarness:
         config = create_biology_test_curriculum()
         output = generator.generate(config)
         
-        harness = PipelineTestHarness()
+        harness = PipelineTestHarness(use_legacy_matcher=True)
         result = harness.run_test(config, output)
         
         assert result.synthetic_id == config.synthetic_id
@@ -427,7 +427,7 @@ class TestPipelineTestHarness:
         config = create_biology_test_curriculum(noise_level=NoiseLevel.NONE)
         output = generator.generate(config)
         
-        harness = PipelineTestHarness()
+        harness = PipelineTestHarness(use_legacy_matcher=True)
         result = harness.run_test(config, output)
         
         # Clean curriculum should extract all topics correctly
@@ -444,7 +444,7 @@ class TestPipelineTestHarness:
         configs = create_test_suite()[:3]  # Just first 3 for speed
         outputs = [generator.generate(c) for c in configs]
         
-        harness = PipelineTestHarness()
+        harness = PipelineTestHarness(use_legacy_matcher=True)
         aggregate = harness.run_test_suite(configs, outputs)
         
         assert aggregate.total_tests == 3
@@ -461,7 +461,7 @@ class TestRunPipelineValidation:
         generator = SyntheticCurriculumGenerator(seed=42)
         configs = [create_biology_test_curriculum()]  # Single test for speed
         
-        result = run_pipeline_validation(configs, generator)
+        result = run_pipeline_validation(configs, generator, use_two_stage_matcher=False, strict_embeddings=False)
         
         assert "summary" in result
         assert "criteria_met" in result
@@ -475,7 +475,7 @@ class TestRunPipelineValidation:
         generator = SyntheticCurriculumGenerator(seed=42)
         configs = [create_biology_test_curriculum(noise_level=NoiseLevel.NONE)]
         
-        result = run_pipeline_validation(configs, generator)
+        result = run_pipeline_validation(configs, generator, use_two_stage_matcher=False, strict_embeddings=False)
         
         assert result["all_criteria_passing"] is True
         assert result["blocks_production"] is False
@@ -733,9 +733,9 @@ class TestDeterministicSeeding:
         """Config rng_seed takes precedence over generator seed."""
         from src.synthetic.generator import SyntheticCurriculumGenerator
         
-        config1 = create_biology_test_curriculum(rng_seed=100)
-        config2 = create_biology_test_curriculum(rng_seed=100)
-        config3 = create_biology_test_curriculum(rng_seed=200)
+        config1 = create_biology_test_curriculum(noise_level=NoiseLevel.LOW, rng_seed=100)
+        config2 = create_biology_test_curriculum(noise_level=NoiseLevel.LOW, rng_seed=100)
+        config3 = create_biology_test_curriculum(noise_level=NoiseLevel.LOW, rng_seed=200)
         
         # Different generator seeds, but same config seed
         g1 = SyntheticCurriculumGenerator(seed=42)

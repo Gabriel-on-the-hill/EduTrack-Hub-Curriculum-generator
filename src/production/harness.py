@@ -102,7 +102,7 @@ class ProductionHarness:
             storage_path=storage_path
         )
         
-    def generate_artifact(
+    async def generate_artifact(
         self, 
         curriculum_id: str, 
         config: SyntheticCurriculumConfig,
@@ -123,7 +123,7 @@ class ProductionHarness:
         content_mode = fetch_curriculum_mode(self.db, curriculum_id)
         
         # B. Primary Execution
-        primary_out = self._run_generation(curriculum_id, config)
+        primary_out = await self._run_generation(curriculum_id, config)
         
         # C. Governance Check
         jurisdiction = self._derive_jurisdiction(config)
@@ -143,7 +143,7 @@ class ProductionHarness:
             raise GroundingViolationError(report.ungrounded_sentences)
                 
         # E. Shadow Execution
-        shadow_out = self._run_shadow_generation(curriculum_id, config)
+        shadow_out = await self._run_shadow_generation(curriculum_id, config)
         
         # F. Topic Extraction (REAL - not empty lists)
         primary_topics = extract_topics(primary_out.content_markdown)

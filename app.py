@@ -346,33 +346,22 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
         time.sleep(0.5)
         
         try:
-            # CALL THE REAL HARNESS
-            # We must use asyncio because _run_generation is async
             import asyncio
             
             st.write("🧠 **LLM:** Generating Content (Gemini Flash)...")
             
-            # Create a simplified provenance dict
-            provenance = {"user_id": "demo-user", "session": "streamlit"}
+            # Build provenance for governance enforcement
+            provenance = {
+                "curriculum_id": curriculum_id,
+                "source_list": [{"url": "https://edutrack.demo", "authority": "EduTrack", "fetch_date": "2026-02-15"}],
+                "retrieval_timestamp": "2026-02-15T00:00:00Z",
+                "extraction_confidence": 0.95,
+                "user_id": "demo-user",
+                "session": "streamlit"
+            }
             
-            # Since generate_artifact is synchronous in harness.py but calls async methods,
-            # we typically need to fix harness to be async or run_async.
-            # Looking at harness.py, generate_artifact is standard def, but calls _run_generation.
-            # _run_generation IS async def.
-            # So generate_artifact returns a coroutine? No, wait.
-            # 
-            # In harness.py:
-            # def generate_artifact(...)
-            #    primary_out = self._run_generation(...)
-            #
-            # If _run_generation is async, this line returns a Coroutine object, not the result!
-            # The Harness as written in previous step has `async def _run_generation`.
-            # So `generate_artifact` needs to await it.
-            # 
-            # QUICK FIX: We will run the internal async method here directly for the demo
-            # to avoid refactoring the entire synchronous Harness class right now.
-            
-            payload = asyncio.run(harness._run_generation(curriculum_id, config))
+            # Call the full production pipeline (governance + grounding + shadow checks)
+            payload = asyncio.run(harness.generate_artifact(curriculum_id, config, provenance))
             
             status.update(label="✅ Generation Complete", state="complete", expanded=False)
             

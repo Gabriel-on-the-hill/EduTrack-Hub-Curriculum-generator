@@ -5,8 +5,9 @@ Verifies provenance schema enforcement and university disclaimers.
 """
 
 import pytest
+from unittest.mock import Mock
 from src.production.governance import GovernanceEnforcer, ProvenanceBlock
-from src.synthetic.schemas import SyntheticCurriculumOutput
+from src.synthetic.schemas import SyntheticCurriculumOutput, SyntheticCurriculumConfig
 
 @pytest.fixture
 def valid_provenance():
@@ -26,27 +27,37 @@ def valid_provenance():
 def enforcer():
     return GovernanceEnforcer(strict_mode=True)
 
+@pytest.fixture
+def mock_config():
+    """Create a mock SyntheticCurriculumConfig to satisfy the required field."""
+    return Mock(spec=SyntheticCurriculumConfig)
+
+def _make_output(curriculum_id="test-uuid", content_markdown="Some content", metrics=None, config=None):
+    """Helper to construct SyntheticCurriculumOutput bypassing validation."""
+    return SyntheticCurriculumOutput.model_construct(
+        config=config or Mock(spec=SyntheticCurriculumConfig),
+        curriculum_id=curriculum_id,
+        content_markdown=content_markdown,
+        metrics=metrics or {},
+    )
+
 def test_governance_enforces_provenance_schema(enforcer, valid_provenance):
     """Governance must accept valid provenance."""
-    output = SyntheticCurriculumOutput(
-        curriculum_id="test-uuid",
-        content_markdown="Some content",
-        metrics={}
-    )
+    output = _make_output(curriculum_id="test-uuid", content_markdown="Some content", metrics={})
     
     result = enforcer.enforce(output, "National", valid_provenance)
     assert result.metadata["provenance_block"]["curriculum_id"] == "test-uuid"
 
 def test_governance_rejects_missing_provenance(enforcer):
     """Governance must raise violation if provenance is missing."""
-    output = SyntheticCurriculumOutput(curriculum_id="id", content_markdown="cx")
+    output = _make_output(curriculum_id="id", content_markdown="cx")
     
     with pytest.raises(ValueError, match="Governance Violation"):
         enforcer.enforce(output, "National", None)
 
 def test_university_content_gets_disclaimer(enforcer, valid_provenance):
     """University content must have disclaimer injected."""
-    output = SyntheticCurriculumOutput(
+    output = _make_output(
         curriculum_id="test-uuid",
         content_markdown="# Lecture 1\nContent."
     )
@@ -60,7 +71,7 @@ def test_university_content_gets_disclaimer(enforcer, valid_provenance):
 def test_university_low_confidence_flagged(enforcer, valid_provenance):
     """Low confidence university content is flagged."""
     valid_provenance["extraction_confidence"] = 0.80
-    output = SyntheticCurriculumOutput(curriculum_id="id", content_markdown="c")
+    output = _make_output(curriculum_id="id", content_markdown="c")
     
     result = enforcer.enforce(output, "Active University", valid_provenance)
     

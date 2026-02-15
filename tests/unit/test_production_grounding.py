@@ -14,19 +14,22 @@ def mock_embedding_provider():
     """Mock embedding provider to control similarities."""
     provider = Mock()
     # Mock behavior: return predictable embeddings
-    # If text == source_text, dot product should be 1.0 (after normalization)
+    # Sentences containing "aligned" -> [1.0, 0.0] (grounded)
+    # Sentences containing "unrelated" -> [0.0, 1.0] (not grounded)
     
     def fake_embed(texts):
         # Return simple 2D vectors
-        # "match" -> [1.0, 0.0]
-        # "mismatch" -> [0.0, 1.0]
+        # "aligned" -> [1.0, 0.0]
+        # "unrelated" -> [0.0, 1.0]
+        # Anything else defaults to [0.0, 1.0] (ungrounded)
         embeddings = []
         for t in texts:
-            if "match" in t:
+            if "aligned" in t.lower():
                 embeddings.append([1.0, 0.0])
-            elif "partial" in t:
-                embeddings.append([0.707, 0.707]) # 45 deg, cos=0.707
+            elif "unrelated" in t.lower():
+                embeddings.append([0.0, 1.0])
             else:
+                # Default: check if it looks like it should be grounded
                 embeddings.append([0.0, 1.0])
         return embeddings
         
@@ -37,8 +40,9 @@ def test_k12_fails_with_ungrounded_sentence(mock_embedding_provider):
     """K-12 must reject artifact if even ONE sentence is ungrounded."""
     verifier = GroundingVerifier(embedding_provider=mock_embedding_provider, similarity_threshold=0.85)
     
-    competencies = [{"id": "c1", "text": "match this competency"}]
-    artifact_text = "This should match. This is mismatch."
+    competencies = [{"id": "c1", "text": "This is an aligned competency topic"}]
+    # Use sentences > 10 chars so they pass the sentence splitter filter
+    artifact_text = "This sentence is aligned with the topic. This sentence is unrelated to everything."
     
     report = verifier.verify_artifact(artifact_text, competencies, mode="k12")
     
@@ -52,8 +56,8 @@ def test_k12_passes_with_perfect_grounding(mock_embedding_provider):
     """K-12 passes only if ALL sentences are grounded."""
     verifier = GroundingVerifier(embedding_provider=mock_embedding_provider)
     
-    competencies = [{"id": "c1", "text": "match this competency"}]
-    artifact_text = "This should match. match match."
+    competencies = [{"id": "c1", "text": "This is an aligned competency topic"}]
+    artifact_text = "This sentence is aligned with the curriculum. Another aligned sentence here."
     
     report = verifier.verify_artifact(artifact_text, competencies, mode="k12")
     
@@ -64,11 +68,12 @@ def test_university_allows_small_deviation(mock_embedding_provider):
     """University allows 5% ungrounded."""
     verifier = GroundingVerifier(embedding_provider=mock_embedding_provider)
     
-    competencies = [{"id": "c1", "text": "match this competency"}]
+    competencies = [{"id": "c1", "text": "This is an aligned competency topic"}]
     
-    # 20 sentences: 19 matches, 1 mismatch = 95% rate -> PASS
-    sentences = ["match"] * 19 + ["mismatch"]
-    artifact_text = ". ".join(sentences) + "."
+    # 20 sentences: 19 aligned, 1 unrelated = 95% rate -> PASS
+    aligned_sentences = [f"Sentence number {i} is aligned with the curriculum" for i in range(19)]
+    unrelated_sentences = ["This sentence is unrelated to anything"]
+    artifact_text = ". ".join(aligned_sentences + unrelated_sentences) + "."
     
     report = verifier.verify_artifact(artifact_text, competencies, mode="university")
     
@@ -76,17 +81,21 @@ def test_university_allows_small_deviation(mock_embedding_provider):
     assert report.grounded_count == 19
     assert report.ungrounded_count == 1
     assert report.grounding_rate == 0.95
-    assert report.verdict == "PASS" # 0.95 is valid for Uni
+    assert report.verdict == "PASS"  # 0.95 is valid for Uni
 
 def test_university_rejects_large_deviation(mock_embedding_provider):
     """University rejects >5% ungrounded."""
     verifier = GroundingVerifier(embedding_provider=mock_embedding_provider)
     
-    competencies = [{"id": "c1", "text": "match this competency"}]
+    competencies = [{"id": "c1", "text": "This is an aligned competency topic"}]
     
-    # 20 sentences: 18 matches, 2 mismatch = 90% rate -> FAIL
-    sentences = ["match"] * 18 + ["mismatch", "mismatch"]
-    artifact_text = ". ".join(sentences) + "."
+    # 20 sentences: 18 aligned, 2 unrelated = 90% rate -> FAIL
+    aligned_sentences = [f"Sentence number {i} is aligned with the curriculum" for i in range(18)]
+    unrelated_sentences = [
+        "This sentence is unrelated to anything",
+        "Another unrelated sentence appears here"
+    ]
+    artifact_text = ". ".join(aligned_sentences + unrelated_sentences) + "."
     
     report = verifier.verify_artifact(artifact_text, competencies, mode="university")
     

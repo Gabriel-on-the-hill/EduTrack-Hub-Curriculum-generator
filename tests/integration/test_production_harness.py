@@ -13,6 +13,7 @@ Updated for new modular architecture.
 import unittest
 import tempfile
 import os
+import asyncio
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
 
@@ -55,10 +56,24 @@ class TestHarnessRejectsUngroundedEndToEnd(unittest.TestCase):
             verify_db_level=False
         )
         
+        # Mock _run_generation to return a fake output (avoids calling Gemini)
+        mock_output = SyntheticCurriculumOutput.model_construct(
+            curriculum_id="test-id",
+            content_markdown="# Test content with ungrounded material",
+            metrics={},
+            metadata={}
+        )
+        
+        async def fake_generation(*args, **kwargs):
+            return mock_output
+        
+        self.harness._run_generation = fake_generation
+        
         # Mock grounding to return failure
         self.mock_report = Mock()
         self.mock_report.is_clean = False
         self.mock_report.grounding_rate = 0.50
+        self.mock_report.verdict = "FAIL"
         self.mock_report.ungrounded_sentences = ["Ungrounded sentence 1", "Ungrounded sentence 2"]
         
         self.harness.grounding.verify_artifact = Mock(return_value=self.mock_report)
@@ -79,11 +94,11 @@ class TestHarnessRejectsUngroundedEndToEnd(unittest.TestCase):
         }
         
         with self.assertRaises(GroundingViolationError) as ctx:
-            self.harness.generate_artifact(
+            asyncio.run(self.harness.generate_artifact(
                 curriculum_id="test-id",
                 config=Mock(),
                 provenance=provenance
-            )
+            ))
         
         self.assertIn("ungrounded content", str(ctx.exception))
 
@@ -138,11 +153,11 @@ class TestShadowBlockerTriggersAndPersistsAlert(unittest.TestCase):
         }
         
         with self.assertRaises(HallucinationBlockError) as ctx:
-            self.harness.generate_artifact(
+            asyncio.run(self.harness.generate_artifact(
                 curriculum_id="test-id",
                 config=Mock(),
                 provenance=provenance
-            )
+            ))
         
         self.assertIn("HALLUCINATION_RISK_HIGH", ctx.exception.alerts)
 
