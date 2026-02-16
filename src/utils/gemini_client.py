@@ -40,11 +40,15 @@ class GeminiModel(str, Enum):
     PRO = "gemini-1.5-pro"      # Escalation: High/Critical tasks
 
 
-# Mapping from GeminiModel to OpenRouter model identifiers
-OPENROUTER_MODEL_MAP: dict[str, str] = {
-    GeminiModel.FLASH: "meta-llama/llama-4-scout:free",
-    GeminiModel.PRO: "meta-llama/llama-4-scout:free",
-}
+# Ordered fallback chain of free OpenRouter models
+OPENROUTER_FREE_MODELS: list[str] = [
+    "openrouter/free",                              # Auto-router: picks best available free model
+    "meta-llama/llama-4-maverick:free",              # Llama 4 Maverick
+    "deepseek/deepseek-chat-v3-0324:free",           # DeepSeek V3
+    "meta-llama/llama-3.3-70b-instruct:free",        # Llama 3.3 70B
+    "google/gemma-3-27b-it:free",                    # Gemma 3 27B
+    "mistralai/mistral-small-3.1-24b-instruct:free", # Mistral Small
+]
 
 
 class RateLimitConfig:
@@ -110,6 +114,7 @@ class OpenRouterClient:
     OpenRouter.ai client — drop-in alternative to Gemini.
     
     Uses requests (already installed) to call OpenRouter's REST API.
+    Automatically falls back through multiple free models if one is unavailable.
     Sign up at https://openrouter.ai to get a free API key.
     """
     
@@ -146,37 +151,62 @@ class OpenRouterClient:
         self._total_tokens = 0
         self._estimated_cost = 0.0
     
-    def _resolve_model(self, model: GeminiModel) -> str:
-        """Map GeminiModel enum to an OpenRouter model string."""
-        return OPENROUTER_MODEL_MAP.get(model, "google/gemma-3-27b-it:free")
-    
     def _call_api(self, messages: list[dict], model: str, temperature: float) -> str:
-        """Make a synchronous HTTP call to OpenRouter with 429 retry."""
+        """
+        Make a synchronous HTTP call to OpenRouter.
+        
+        Tries the requested model first. On 404 or 429, falls back
+        through the OPENROUTER_FREE_MODELS chain.
+        """
         import time as _time
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-        }
         
-        for attempt in range(3):
-            resp = self._requests.post(self._base_url, headers=headers, json=payload, timeout=120)
-            if resp.status_code == 429:
-                wait = int(resp.headers.get("Retry-After", 30))
-                logger.warning(f"OpenRouter 429 rate limit, waiting {wait}s...")
-                _time.sleep(wait)
+        # Build model list: requested model first, then fallbacks
+        models_to_try = [model] + [m for m in OPENROUTER_FREE_MODELS if m != model]
+        
+        last_error = None
+        for try_model in models_to_try:
+            payload = {
+                "model": try_model,
+                "messages": messages,
+                "temperature": temperature,
+            }
+            
+            try:
+                resp = self._requests.post(
+                    self._base_url, headers=headers, json=payload, timeout=120
+                )
+                
+                if resp.status_code == 404:
+                    logger.warning(f"Model {try_model} not found, trying next...")
+                    continue
+                
+                if resp.status_code == 429:
+                    wait = min(int(resp.headers.get("Retry-After", 10)), 30)
+                    logger.warning(f"Model {try_model} rate-limited, trying next after {wait}s...")
+                    _time.sleep(wait)
+                    continue
+                
+                resp.raise_for_status()
+                data = resp.json()
+                
+                used_model = try_model
+                if try_model != model:
+                    logger.info(f"Fallback: used {try_model} instead of {model}")
+                
+                return data["choices"][0]["message"]["content"] or ""
+                
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Error with {try_model}: {e}")
                 continue
-            resp.raise_for_status()
-            break
-        else:
-            resp.raise_for_status()  # raise the last 429
         
-        data = resp.json()
-        return data["choices"][0]["message"]["content"] or ""
+        raise ValueError(
+            f"All free models exhausted. Last error: {last_error}"
+        )
     
     async def generate_structured(
         self,
@@ -187,7 +217,7 @@ class OpenRouterClient:
         max_retries: int = 3,
     ) -> T:
         """Generate structured output validated against a Pydantic schema."""
-        or_model = self._resolve_model(model)
+        or_model = OPENROUTER_FREE_MODELS[0]
         json_schema = response_schema.model_json_schema()
         
         system_msg = (
@@ -238,7 +268,7 @@ class OpenRouterClient:
         temperature: float = 0.7,
     ) -> str:
         """Generate plain text output."""
-        or_model = self._resolve_model(model)
+        or_model = OPENROUTER_FREE_MODELS[0]
         messages = [{"role": "user", "content": prompt}]
         
         text = await asyncio.to_thread(self._call_api, messages, or_model, temperature)
