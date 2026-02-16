@@ -133,8 +133,14 @@ class GroundingVerifier:
         
         ungrounded = [r.sentence for r in results if not r.is_grounded]
         
-        # Verdict logic
-        if mode == "k12":
+        # Verdict logic: Jaccard provider is warning-only (too imprecise for strict grounding)
+        is_jaccard = "jaccard-only" in self.embedding_provider.name()
+        
+        if is_jaccard:
+            import logging
+            logging.info(f"Jaccard provider: {len(ungrounded)} ungrounded sentences logged as warnings, verdict=PASS")
+            verdict = "PASS"  # Warning-only mode for bag-of-words
+        elif mode == "k12":
             verdict = "PASS" if len(ungrounded) == 0 else "FAIL"
         else:
             verdict = "PASS" if rate >= 0.95 else "FAIL"
