@@ -270,7 +270,7 @@ class ShadowDeltaLogger:
         log_entry = ShadowLog(
             job_id=job_id,
             request_id=request_id,
-            curriculum_id=curriculum_id,
+            curriculum_id=str(curriculum_id),
             timestamp=timestamp,
             primary_summary={
                 "topic_count": len(primary_topics),
