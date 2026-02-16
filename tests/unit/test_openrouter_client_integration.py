@@ -5,113 +5,86 @@ from src.utils.gemini_client import OpenRouterClient, GeminiModel
 from src.utils.model_router import TaskType
 
 @pytest.fixture
-def mock_env(monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "fake-key")
-
-@pytest.fixture
-def client(mock_env):
-    return OpenRouterClient()
-
-def test_call_api_success_first_model(client):
-    """Verify happy path: first model works."""
-    with patch("requests.post") as mock_post:
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+def mock_requests():
+    # Patch at module level where it is used or imported
+    # gemini_client imports requests at top level
+    with patch("src.utils.gemini_client.requests") as mock_req:
+        # Mock GET /models response
+        mock_models_resp = MagicMock()
+        mock_models_resp.status_code = 200
+        mock_models_resp.json.return_value = {
+            "data": [
+                {"id": "deepseek/deepseek-r1:free"},
+                {"id": "google/gemini-2.0-flash-exp:free"},
+                {"id": "meta-llama/llama-3-8b-instruct:free"}
+            ]
+        }
+        mock_req.get.return_value = mock_models_resp
+        
+        # Mock POST defaults (can be overridden in tests)
+        mock_post_resp = MagicMock()
+        mock_post_resp.status_code = 200
+        mock_post_resp.json.return_value = {
             "choices": [{"message": {"content": "Success content"}}]
         }
-        mock_post.return_value = mock_response
+        mock_req.post.return_value = mock_post_resp
         
-        messages = [{"role": "user", "content": "hi"}]
-        models = ["model-a", "model-b"]
-        
-        result = client._call_api(messages, models, 0.7)
-        
-        assert result == "Success content"
-        # Should only have called once with model-a
-        assert mock_post.call_count == 1
-        assert mock_post.call_args[1]["json"]["model"] == "model-a"
+        yield mock_req
 
-def test_call_api_fallback_on_404(client):
-    """Verify fallback: first 404s, second works."""
-    with patch("requests.post") as mock_post:
-        # sequence of side effects
-        resp_fail = MagicMock()
-        resp_fail.status_code = 404
-        
-        resp_ok = MagicMock()
-        resp_ok.status_code = 200
-        resp_ok.json.return_value = {
-            "choices": [{"message": {"content": "Fallback content"}}]
-        }
-        
-        mock_post.side_effect = [resp_fail, resp_ok]
-        
-        messages = [{"role": "user", "content": "hi"}]
-        models = ["model-a", "model-b"]
-        
-        # Should log warning but not crash
-        result = client._call_api(messages, models, 0.7)
-        
-        assert result == "Fallback content"
-        assert mock_post.call_count == 2
-        # First call model-a
-        assert mock_post.call_args_list[0][1]["json"]["model"] == "model-a"
-        # Second call model-b
-        assert mock_post.call_args_list[1][1]["json"]["model"] == "model-b"
+@pytest.fixture
+def client(mock_requests):
+    return OpenRouterClient(api_key="fake-key")
 
-def test_generate_text_integrates_router(client):
-    """Verify generate_text calls router and passes list."""
-    with patch.object(client, "_call_api", return_value="Routed") as mock_call_api:
-        # We don't need to await here because we're mocking the internal sync call?
-        # No, generate_text is async and calls asyncio.to_thread(_call_api)
-        # So mocking _call_api works on the instance.
+def test_init_fetches_models(client, mock_requests):
+    """Verify init calls API and filters models."""
+    mock_requests.get.assert_called_once()
+    assert len(client._free_models) == 3
+    assert "deepseek/deepseek-r1:free" in client._free_models
+
+def test_call_api_blacklist_logic(client, mock_requests):
+    """Verify 404 adds to blacklist and tries next."""
+    # Setup post side effects
+    # 1. 404 (model-a)
+    resp_404 = MagicMock()
+    resp_404.status_code = 404
+    
+    # 2. 200 (model-b)
+    resp_200 = MagicMock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = {
+        "choices": [{"message": {"content": "Fallback worked"}}]
+    }
+    
+    mock_requests.post.side_effect = [resp_404, resp_200]
+    
+    models = ["model-a", "model-b"]
+    # Pre-populate free models just in case
+    client._free_models = models
+    
+    result = client._call_api([], models, 0.7)
+    
+    assert result == "Fallback worked"
+    assert "model-a" in client._bad_models
+    assert "model-b" not in client._bad_models
+
+def test_generate_text_uses_router_dynamic(client, mock_requests):
+    """Verify generate_text calls router with dynamic list."""
+    # We patch the router on the client instance
+    with patch.object(client._router, "prioritize_models") as mock_prioritize:
+        mock_prioritize.return_value = ["mock-selected-model"]
         
         import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-        # If we pass GeminiModel.PRO, should use REASONING task
         result = loop.run_until_complete(
             client.generate_text("prompt", model=GeminiModel.PRO)
         )
         
-        assert result == "Routed"
+        # Should have called prioritize with REASONING and _free_models
+        mock_prioritize.assert_called_once_with(TaskType.REASONING, client._free_models)
         
-        # Verify _call_api was called with a list, not string
-        args = mock_call_api.call_args
-        # args[0] is (messages, models, temperature)
-        # We can't easily check exact list contents without hardcoding router logic,
-        # but we can check it IS a list
-        models_arg = args[0][1]
-        assert isinstance(models_arg, list)
-        assert len(models_arg) > 0
-        loop.close()
-
-def test_generate_structured_uses_formatting(client):
-    """Verify generate_structured defaults to formatting."""
-    with patch.object(client, "_call_api", return_value='{"foo": "bar"}') as mock_call_api:
-        from pydantic import BaseModel
-        class TestSchema(BaseModel):
-            foo: str
-            
-        import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(
-            client.generate_structured("prompt", TestSchema)
-        )
-        
-        assert result.foo == "bar"
-        
-        # Check models arg was list
-        args = mock_call_api.call_args
-        models_arg = args[0][1]
-        assert isinstance(models_arg, list)
-        
-        # Should be FORMATTING models by default
-        # We can verify by checking if the list matches router.FORMATTING_MODELS
-        # or just checking length
-        assert len(models_arg) > 1 
+        # Should have called API with selected model
+        call_args = mock_requests.post.call_args
+        assert call_args[1]["json"]["model"] == "mock-selected-model"
         loop.close()

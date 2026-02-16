@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import requests
 import time
 from enum import Enum
 from typing import Any, TypeVar
@@ -122,22 +123,21 @@ class OpenRouterClient:
     Sign up at https://openrouter.ai to get a free API key.
     """
     
-    def __init__(self) -> None:
-        import requests as _requests
-        self._requests = _requests
+    def __init__(self, api_key: str | None = None) -> None:
+        self._requests = requests
         
-        api_key = None
-        
-        # Try Streamlit secrets
-        try:
-            import streamlit as st
-            api_key = st.secrets.get("OPENROUTER_API_KEY")
-        except Exception:
-            pass
-        
-        # Fallback to env
+        # Resolve API Key
         if not api_key:
-            api_key = os.getenv("OPENROUTER_API_KEY")
+            # Try Streamlit secrets
+            try:
+                import streamlit as st
+                api_key = st.secrets.get("OPENROUTER_API_KEY")
+            except Exception:
+                pass
+            
+            # Fallback to env
+            if not api_key:
+                api_key = os.getenv("OPENROUTER_API_KEY")
         
         if not api_key:
             raise ValueError(
@@ -155,8 +155,49 @@ class OpenRouterClient:
         self._total_tokens = 0
         self._estimated_cost = 0.0
         
-        # Initialize Smart Model Router
+        # Session state
+        self._bad_models: set[str] = set()
         self._router = ModelRouter()
+        
+        # Dynamic Discovery
+        self._free_models: list[str] = []
+        self._refresh_models()
+
+    def _refresh_models(self):
+        """Fetch real models from API and filter for free ones."""
+        try:
+            logger.info("Fetching available models from OpenRouter...")
+            resp = self._requests.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                timeout=30
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            
+            all_models = [m["id"] for m in data.get("data", [])]
+            
+            # Filter for free models
+            self._free_models = [
+                m for m in all_models 
+                if m.endswith(":free") or m == "openrouter/auto"
+            ]
+            
+            if not self._free_models:
+                logger.warning("No free models found in API response! Using fallback.")
+                self._free_models = ["openrouter/auto"]
+                
+            logger.info(f"Discovered {len(self._free_models)} free models.")
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch models from OpenRouter: {e}")
+            logger.warning("Falling back to minimal safe model list.")
+            # Fallback to absolute basics if API fails entirely
+            self._free_models = [
+                "openrouter/auto",
+                "google/gemini-2.0-flash-exp:free",
+                "meta-llama/llama-3-8b-instruct:free"
+            ]
     
     def _call_api(self, messages: list[dict], models: list[str], temperature: float) -> str:
         """
@@ -164,6 +205,7 @@ class OpenRouterClient:
         
         Iterates through the provided list of models until one succeeds.
         Handles 404 (model not found) and 429 (rate limit) errors.
+        Respects session blacklist for broken models.
         """
         import time as _time
         headers = {
@@ -172,8 +214,17 @@ class OpenRouterClient:
             "HTTP-Referer": "https://github.com/Gabriel-on-the-hill/EduTrack-Curriculum-generator",
         }
         
-        # Use provided model list; if empty, fallback to default router list
-        models_to_try = models if models else self._router.get_candidate_models(TaskType.STANDARD)
+        # Use provided model list; if empty, use known free models
+        candidates = models if models else self._free_models
+        
+        # Filter out blacklisted models
+        models_to_try = [m for m in candidates if m not in self._bad_models]
+        
+        if not models_to_try:
+            # If all blackened, try resetting or just fail
+            # Just fail for now, or try openrouter/auto as last ditch
+            logger.warning("All candidates are blacklisted! Trying openrouter/auto.")
+            models_to_try = ["openrouter/auto"]
         
         last_error = None
         for try_model in models_to_try:
@@ -189,7 +240,14 @@ class OpenRouterClient:
                 )
                 
                 if resp.status_code == 404:
-                    logger.warning(f"Model {try_model} not found, trying next...")
+                    logger.warning(f"Model {try_model} not found (404). Blacklisting.")
+                    self._bad_models.add(try_model)
+                    continue
+                    
+                if resp.status_code == 400:
+                    # Often means model doesn't support params or is deprecated
+                    logger.warning(f"Model {try_model} returned 400. Blacklisting.")
+                    self._bad_models.add(try_model)
                     continue
                 
                 if resp.status_code == 429:
@@ -230,7 +288,7 @@ class OpenRouterClient:
         if model == GeminiModel.PRO:
             effective_task = TaskType.REASONING
             
-        candidates = self._router.get_candidate_models(effective_task)
+        candidates = self._router.prioritize_models(effective_task, self._free_models)
         
         json_schema = response_schema.model_json_schema()
         
@@ -293,7 +351,7 @@ class OpenRouterClient:
             effective_task = task_type
             if model == GeminiModel.PRO:
                 effective_task = TaskType.REASONING
-            candidates = self._router.get_candidate_models(effective_task)
+            candidates = self._router.prioritize_models(effective_task, self._free_models)
             
         system_msg = "You are a helpful curriculum assistant."
         messages = [
