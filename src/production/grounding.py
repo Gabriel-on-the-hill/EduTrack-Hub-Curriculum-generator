@@ -55,7 +55,13 @@ class GroundingVerifier:
             similarity_threshold: Min cosine similarity to consider grounded
         """
         self.embedding_provider = embedding_provider or get_embedding_provider()
-        self.similarity_threshold = similarity_threshold
+        
+        # Adjust threshold for Jaccard/BoW fallback
+        # 0.8 is too high for bag-of-words (requires near-duplicate text)
+        if "jaccard-only" in self.embedding_provider.name():
+            self.similarity_threshold = 0.3
+        else:
+            self.similarity_threshold = similarity_threshold
     
     def verify_artifact(
         self,
