@@ -80,14 +80,15 @@ class GroundingVerifier:
             
         results = []
         
-        # Optimize: Batch embed sentences if provider supports it
-        # For now, simple loop for clarity/safety
-        
-        # Pre-compute competency embeddings
+        # Embed competencies and sentences TOGETHER to ensure
+        # consistent vector dimensions (critical for JaccardOnlyProvider
+        # which builds vocabulary per call)
         comp_texts = [c['text'] for c in competencies]
-        comp_embeddings = self.embedding_provider.embed(comp_texts)
+        all_texts = comp_texts + sentences
+        all_embeddings = self.embedding_provider.embed(all_texts)
         
-        sent_embeddings = self.embedding_provider.embed(sentences)
+        comp_embeddings = all_embeddings[:len(comp_texts)]
+        sent_embeddings = all_embeddings[len(comp_texts):]
         
         for i, sentence in enumerate(sentences):
             # 1. Check for specific Citation IDs (Fast path)
