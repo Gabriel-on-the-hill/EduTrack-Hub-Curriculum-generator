@@ -109,11 +109,14 @@ class OpenRouterClient:
     """
     OpenRouter.ai client — drop-in alternative to Gemini.
     
-    Uses the OpenAI-compatible API with free models.
+    Uses requests (already installed) to call OpenRouter's REST API.
     Sign up at https://openrouter.ai to get a free API key.
     """
     
     def __init__(self) -> None:
+        import requests as _requests
+        self._requests = _requests
+        
         api_key = None
         
         # Try Streamlit secrets
@@ -133,11 +136,8 @@ class OpenRouterClient:
                 "Get a free key at https://openrouter.ai/keys"
             )
         
-        from openai import OpenAI
-        self._client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key,
-        )
+        self._api_key = api_key
+        self._base_url = "https://openrouter.ai/api/v1/chat/completions"
         self._configured = True
         self._daily_calls: dict[str, int] = {
             GeminiModel.FLASH: 0,
@@ -149,6 +149,23 @@ class OpenRouterClient:
     def _resolve_model(self, model: GeminiModel) -> str:
         """Map GeminiModel enum to an OpenRouter model string."""
         return OPENROUTER_MODEL_MAP.get(model, "google/gemma-3-27b-it:free")
+    
+    def _call_api(self, messages: list[dict], model: str, temperature: float) -> str:
+        """Make a synchronous HTTP call to OpenRouter."""
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        
+        resp = self._requests.post(self._base_url, headers=headers, json=payload, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"] or ""
     
     async def generate_structured(
         self,
@@ -166,25 +183,28 @@ class OpenRouterClient:
             "You are a precise curriculum generation assistant. "
             "You MUST respond with valid JSON matching this schema:\n"
             f"{json.dumps(json_schema, indent=2)}\n"
-            "Respond ONLY with the JSON object, no extra text."
+            "Respond ONLY with the JSON object, no markdown fences, no extra text."
         )
+        
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": prompt},
+        ]
         
         last_error: Exception | None = None
         for attempt in range(max_retries):
             try:
-                response = await asyncio.to_thread(
-                    self._client.chat.completions.create,
-                    model=or_model,
-                    messages=[
-                        {"role": "system", "content": system_msg},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=temperature,
-                    response_format={"type": "json_object"},
-                )
+                text = await asyncio.to_thread(self._call_api, messages, or_model, temperature)
                 
                 self._daily_calls[model] += 1
-                text = response.choices[0].message.content or ""
+                # Strip markdown code fences if present
+                text = text.strip()
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+                    if text.endswith("```"):
+                        text = text[:-3]
+                    text = text.strip()
+                
                 data = json.loads(text)
                 return response_schema.model_validate(data)
                 
@@ -208,18 +228,11 @@ class OpenRouterClient:
     ) -> str:
         """Generate plain text output."""
         or_model = self._resolve_model(model)
+        messages = [{"role": "user", "content": prompt}]
         
-        response = await asyncio.to_thread(
-            self._client.chat.completions.create,
-            model=or_model,
-            messages=[
-                {"role": "user", "content": prompt},
-            ],
-            temperature=temperature,
-        )
-        
+        text = await asyncio.to_thread(self._call_api, messages, or_model, temperature)
         self._daily_calls[model] += 1
-        return response.choices[0].message.content or ""
+        return text
     
     def select_model_for_tier(self, tier: FallbackTier) -> GeminiModel:
         if tier == FallbackTier.TIER_0:
