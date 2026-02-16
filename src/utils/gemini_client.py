@@ -21,14 +21,9 @@ import asyncio
 import json
 import logging
 import os
-import requests
 import time
 from enum import Enum
 from typing import Any, TypeVar
-from uuid import uuid4
-
-# Import Model Router for smart selection
-from src.utils.model_router import ModelRouter, TaskType
 
 from pydantic import BaseModel
 
@@ -123,21 +118,22 @@ class OpenRouterClient:
     Sign up at https://openrouter.ai to get a free API key.
     """
     
-    def __init__(self, api_key: str | None = None) -> None:
-        self._requests = requests
+    def __init__(self) -> None:
+        import requests as _requests
+        self._requests = _requests
         
-        # Resolve API Key
+        api_key = None
+        
+        # Try Streamlit secrets
+        try:
+            import streamlit as st
+            api_key = st.secrets.get("OPENROUTER_API_KEY")
+        except Exception:
+            pass
+        
+        # Fallback to env
         if not api_key:
-            # Try Streamlit secrets
-            try:
-                import streamlit as st
-                api_key = st.secrets.get("OPENROUTER_API_KEY")
-            except Exception:
-                pass
-            
-            # Fallback to env
-            if not api_key:
-                api_key = os.getenv("OPENROUTER_API_KEY")
+            api_key = os.getenv("OPENROUTER_API_KEY")
         
         if not api_key:
             raise ValueError(
@@ -154,77 +150,22 @@ class OpenRouterClient:
         }
         self._total_tokens = 0
         self._estimated_cost = 0.0
-        
-        # Session state
-        self._bad_models: set[str] = set()
-        self._router = ModelRouter()
-        
-        # Dynamic Discovery
-        self._free_models: list[str] = []
-        self._refresh_models()
-
-    def _refresh_models(self):
-        """Fetch real models from API and filter for free ones."""
-        try:
-            logger.info("Fetching available models from OpenRouter...")
-            resp = self._requests.get(
-                "https://openrouter.ai/api/v1/models",
-                headers={"Authorization": f"Bearer {self._api_key}"},
-                timeout=30
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            
-            all_models = [m["id"] for m in data.get("data", [])]
-            
-            # Filter for free models
-            self._free_models = [
-                m for m in all_models 
-                if m.endswith(":free") or m == "openrouter/auto"
-            ]
-            
-            if not self._free_models:
-                logger.warning("No free models found in API response! Using fallback.")
-                self._free_models = ["openrouter/auto"]
-                
-            logger.info(f"Discovered {len(self._free_models)} free models.")
-            
-        except Exception as e:
-            logger.error(f"Failed to fetch models from OpenRouter: {e}")
-            logger.warning("Falling back to minimal safe model list.")
-            # Fallback to absolute basics if API fails entirely
-            self._free_models = [
-                "openrouter/auto",
-                "google/gemini-2.0-flash-exp:free",
-                "meta-llama/llama-3-8b-instruct:free"
-            ]
     
-    def _call_api(self, messages: list[dict], models: list[str], temperature: float) -> str:
+    def _call_api(self, messages: list[dict], model: str, temperature: float) -> str:
         """
         Make a synchronous HTTP call to OpenRouter.
         
-        Iterates through the provided list of models until one succeeds.
-        Handles 404 (model not found) and 429 (rate limit) errors.
-        Respects session blacklist for broken models.
+        Tries the requested model first. On 404 or 429, falls back
+        through the OPENROUTER_FREE_MODELS chain.
         """
         import time as _time
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/Gabriel-on-the-hill/EduTrack-Curriculum-generator",
         }
         
-        # Use provided model list; if empty, use known free models
-        candidates = models if models else self._free_models
-        
-        # Filter out blacklisted models
-        models_to_try = [m for m in candidates if m not in self._bad_models]
-        
-        if not models_to_try:
-            # If all blackened, try resetting or just fail
-            # Just fail for now, or try openrouter/auto as last ditch
-            logger.warning("All candidates are blacklisted! Trying openrouter/auto.")
-            models_to_try = ["openrouter/auto"]
+        # Build model list: requested model first, then fallbacks
+        models_to_try = [model] + [m for m in OPENROUTER_FREE_MODELS if m != model]
         
         last_error = None
         for try_model in models_to_try:
@@ -240,14 +181,7 @@ class OpenRouterClient:
                 )
                 
                 if resp.status_code == 404:
-                    logger.warning(f"Model {try_model} not found (404). Blacklisting.")
-                    self._bad_models.add(try_model)
-                    continue
-                    
-                if resp.status_code == 400:
-                    # Often means model doesn't support params or is deprecated
-                    logger.warning(f"Model {try_model} returned 400. Blacklisting.")
-                    self._bad_models.add(try_model)
+                    logger.warning(f"Model {try_model} not found, trying next...")
                     continue
                 
                 if resp.status_code == 429:
@@ -259,9 +193,9 @@ class OpenRouterClient:
                 resp.raise_for_status()
                 data = resp.json()
                 
-                # Log if we fell back to a secondary model
-                if try_model != models_to_try[0]:
-                    logger.info(f"Fallback: used {try_model} instead of {models_to_try[0]}")
+                used_model = try_model
+                if try_model != model:
+                    logger.info(f"Fallback: used {try_model} instead of {model}")
                 
                 return data["choices"][0]["message"]["content"] or ""
                 
@@ -283,13 +217,7 @@ class OpenRouterClient:
         max_retries: int = 3,
     ) -> T:
         """Generate structured output validated against a Pydantic schema."""
-        # Use Router: Formatting models are best for JSON structure
-        effective_task = TaskType.FORMATTING
-        if model == GeminiModel.PRO:
-            effective_task = TaskType.REASONING
-            
-        candidates = self._router.prioritize_models(effective_task, self._free_models)
-        
+        or_model = OPENROUTER_FREE_MODELS[0]
         json_schema = response_schema.model_json_schema()
         
         system_msg = (
@@ -307,7 +235,7 @@ class OpenRouterClient:
         last_error: Exception | None = None
         for attempt in range(max_retries):
             try:
-                text = await asyncio.to_thread(self._call_api, messages, candidates, temperature)
+                text = await asyncio.to_thread(self._call_api, messages, or_model, temperature)
                 
                 self._daily_calls[model] += 1
                 # Strip markdown code fences if present
@@ -338,28 +266,14 @@ class OpenRouterClient:
         prompt: str,
         model: GeminiModel = GeminiModel.FLASH,
         temperature: float = 0.7,
-        task_type: TaskType = TaskType.STANDARD,
     ) -> str:
         """Generate plain text output."""
+        or_model = OPENROUTER_FREE_MODELS[0]
+        messages = [{"role": "user", "content": prompt}]
         
-        # Determine candidate models
-        if model not in [GeminiModel.FLASH, GeminiModel.PRO]:
-            # Specific model requested (e.g. from config)
-            candidates = [model]
-        else:
-            # Use Router with task type
-            effective_task = task_type
-            if model == GeminiModel.PRO:
-                effective_task = TaskType.REASONING
-            candidates = self._router.prioritize_models(effective_task, self._free_models)
-            
-        system_msg = "You are a helpful curriculum assistant."
-        messages = [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": prompt},
-        ]
-        
-        return await asyncio.to_thread(self._call_api, messages, candidates, temperature)
+        text = await asyncio.to_thread(self._call_api, messages, or_model, temperature)
+        self._daily_calls[model] += 1
+        return text
     
     def select_model_for_tier(self, tier: FallbackTier) -> GeminiModel:
         if tier == FallbackTier.TIER_0:
