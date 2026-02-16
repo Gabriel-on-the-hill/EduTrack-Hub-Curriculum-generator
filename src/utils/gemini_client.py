@@ -24,6 +24,10 @@ import os
 import time
 from enum import Enum
 from typing import Any, TypeVar
+from uuid import uuid4
+
+# Import Model Router for smart selection
+from src.utils.model_router import ModelRouter, TaskType
 
 from pydantic import BaseModel
 
@@ -150,22 +154,27 @@ class OpenRouterClient:
         }
         self._total_tokens = 0
         self._estimated_cost = 0.0
+        
+        # Initialize Smart Model Router
+        self._router = ModelRouter()
     
-    def _call_api(self, messages: list[dict], model: str, temperature: float) -> str:
+    
+    def _call_api(self, messages: list[dict], models: list[str], temperature: float) -> str:
         """
         Make a synchronous HTTP call to OpenRouter.
         
-        Tries the requested model first. On 404 or 429, falls back
-        through the OPENROUTER_FREE_MODELS chain.
+        Iterates through the provided list of models until one succeeds.
+        Handles 404 (model not found) and 429 (rate limit) errors.
         """
         import time as _time
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/Gabriel-on-the-hill/EduTrack-Curriculum-generator",
         }
         
-        # Build model list: requested model first, then fallbacks
-        models_to_try = [model] + [m for m in OPENROUTER_FREE_MODELS if m != model]
+        # Use provided model list; if empty, fallback to default router list
+        models_to_try = models if models else self._router.get_candidate_models(TaskType.STANDARD)
         
         last_error = None
         for try_model in models_to_try:
@@ -193,9 +202,9 @@ class OpenRouterClient:
                 resp.raise_for_status()
                 data = resp.json()
                 
-                used_model = try_model
-                if try_model != model:
-                    logger.info(f"Fallback: used {try_model} instead of {model}")
+                # Log if we fell back to a secondary model
+                if try_model != models_to_try[0]:
+                    logger.info(f"Fallback: used {try_model} instead of {models_to_try[0]}")
                 
                 return data["choices"][0]["message"]["content"] or ""
                 
@@ -217,7 +226,13 @@ class OpenRouterClient:
         max_retries: int = 3,
     ) -> T:
         """Generate structured output validated against a Pydantic schema."""
-        or_model = OPENROUTER_FREE_MODELS[0]
+        # Use Router: Formatting models are best for JSON structure
+        effective_task = TaskType.FORMATTING
+        if model == GeminiModel.PRO:
+            effective_task = TaskType.REASONING
+            
+        candidates = self._router.get_candidate_models(effective_task)
+        
         json_schema = response_schema.model_json_schema()
         
         system_msg = (
@@ -235,7 +250,7 @@ class OpenRouterClient:
         last_error: Exception | None = None
         for attempt in range(max_retries):
             try:
-                text = await asyncio.to_thread(self._call_api, messages, or_model, temperature)
+                text = await asyncio.to_thread(self._call_api, messages, candidates, temperature)
                 
                 self._daily_calls[model] += 1
                 # Strip markdown code fences if present
@@ -266,12 +281,28 @@ class OpenRouterClient:
         prompt: str,
         model: GeminiModel = GeminiModel.FLASH,
         temperature: float = 0.7,
+        task_type: TaskType = TaskType.STANDARD,
     ) -> str:
         """Generate plain text output."""
-        or_model = OPENROUTER_FREE_MODELS[0]
-        messages = [{"role": "user", "content": prompt}]
         
-        text = await asyncio.to_thread(self._call_api, messages, or_model, temperature)
+        # Determine candidate models
+        if model not in [GeminiModel.FLASH, GeminiModel.PRO]:
+            # Specific model requested (e.g. from config)
+            candidates = [model]
+        else:
+            # Use Router with task type
+            effective_task = task_type
+            if model == GeminiModel.PRO:
+                effective_task = TaskType.REASONING
+            candidates = self._router.get_candidate_models(effective_task)
+            
+        system_msg = "You are a helpful curriculum assistant."
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": prompt},
+        ]
+        
+        text = await asyncio.to_thread(self._call_api, messages, candidates, temperature)
         self._daily_calls[model] += 1
         return text
     
