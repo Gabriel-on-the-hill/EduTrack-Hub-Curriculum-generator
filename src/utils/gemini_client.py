@@ -42,8 +42,8 @@ class GeminiModel(str, Enum):
 
 # Mapping from GeminiModel to OpenRouter model identifiers
 OPENROUTER_MODEL_MAP: dict[str, str] = {
-    GeminiModel.FLASH: "google/gemma-3-27b-it:free",
-    GeminiModel.PRO: "google/gemma-3-27b-it:free",
+    GeminiModel.FLASH: "meta-llama/llama-4-scout:free",
+    GeminiModel.PRO: "meta-llama/llama-4-scout:free",
 }
 
 
@@ -151,7 +151,8 @@ class OpenRouterClient:
         return OPENROUTER_MODEL_MAP.get(model, "google/gemma-3-27b-it:free")
     
     def _call_api(self, messages: list[dict], model: str, temperature: float) -> str:
-        """Make a synchronous HTTP call to OpenRouter."""
+        """Make a synchronous HTTP call to OpenRouter with 429 retry."""
+        import time as _time
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -162,8 +163,18 @@ class OpenRouterClient:
             "temperature": temperature,
         }
         
-        resp = self._requests.post(self._base_url, headers=headers, json=payload, timeout=120)
-        resp.raise_for_status()
+        for attempt in range(3):
+            resp = self._requests.post(self._base_url, headers=headers, json=payload, timeout=120)
+            if resp.status_code == 429:
+                wait = int(resp.headers.get("Retry-After", 30))
+                logger.warning(f"OpenRouter 429 rate limit, waiting {wait}s...")
+                _time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            break
+        else:
+            resp.raise_for_status()  # raise the last 429
+        
         data = resp.json()
         return data["choices"][0]["message"]["content"] or ""
     
