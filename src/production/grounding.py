@@ -60,8 +60,12 @@ class GroundingVerifier:
         # 0.8 is too high for bag-of-words (requires near-duplicate text)
         if "jaccard-only" in self.embedding_provider.name():
             self.similarity_threshold = 0.3
+            import logging
+            logging.info(f"GroundingVerifier: Using Jaccard provider, threshold={self.similarity_threshold}")
         else:
             self.similarity_threshold = similarity_threshold
+            import logging
+            logging.info(f"GroundingVerifier: Using {self.embedding_provider.name()}, threshold={self.similarity_threshold}")
     
     def verify_artifact(
         self,
@@ -108,6 +112,11 @@ class GroundingVerifier:
             )
             
             is_grounded = best_match['score'] >= self.similarity_threshold
+            
+            # Debug logging
+            import logging
+            if not is_grounded:
+                logging.warning(f"Ungrounded sentence (score={best_match['score']:.3f}, threshold={self.similarity_threshold}): {sentence[:60]}...")
             
             results.append(GroundingCheckResult(
                 sentence=sentence,
