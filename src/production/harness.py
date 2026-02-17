@@ -15,6 +15,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
+import os
 
 from sqlalchemy.orm import Session
 
@@ -96,7 +97,14 @@ class ProductionHarness:
         
         # 5. Initialize Middlewares
         self.governance = GovernanceEnforcer(strict_mode=True)
-        self.grounding = GroundingVerifier(embedding_provider=self.embedding_provider)
+        
+        # Grounding Config: Use env var or default to 0.7 (more lenient than 0.8)
+        grounding_threshold = float(os.getenv("GROUNDING_THRESHOLD", "0.7"))
+        self.grounding = GroundingVerifier(
+            embedding_provider=self.embedding_provider,
+            similarity_threshold=grounding_threshold
+        )
+        
         self.shadow_logger = ShadowDeltaLogger(
             embedding_provider=embedding_provider,
             storage_path=storage_path

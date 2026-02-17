@@ -87,6 +87,12 @@ Follow these steps to deploy your curriculum generator to `curriculum.yourwebsit
    ```
    
    *(Note: If `AI_PROVIDER` is missing, it defaults to Google Gemini)*
+   
+   **(Optional) Safety Controls:**
+   Adjust strictness of hallucinations checks (Default: 0.7):
+   ```toml
+   GROUNDING_THRESHOLD = 0.75  # Higher = Stricter (kils creativity)
+   ```
 
 ### 4. Connect Custom Domain
 1. In **Settings > Custom Domain**, enter `curriculum.yourwebsite.com`.
