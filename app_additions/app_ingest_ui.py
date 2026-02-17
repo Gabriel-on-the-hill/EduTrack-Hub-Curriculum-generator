@@ -43,32 +43,49 @@ def add_curriculum_tab(current_user_id: str):
         st.subheader("Search Results")
         results = st.session_state["search_results"]
         
+        import html
+        import requests
+        API_BASE = st.secrets.get("api_base", "http://localhost:8000")
+
         for idx, r in enumerate(results):
-            authority = infer_authority(r['url'])
+            # Safe get for robust implementation
+            title = r.get("title") or r.get("final_url") or r.get("url") or "Untitled"
+            domain = r.get("domain") or ""
+            final_url = r.get("final_url") or r.get("url")
+            official = r.get("official_hint", False)
+            ctype = r.get("content_type") or ""
             
             # Card-like layout
             with st.container(border=True):
                 c1, c2 = st.columns([5, 1])
                 
                 # Title & Metadata
-                title_clean = r.get('title', 'Untitled')
-                c1.markdown(f"**{title_clean}**")
-                c1.caption(f"{r['url'][:60]}...")
+                c1.markdown(f"**[{html.escape(title)}]({html.escape(final_url)})**")
+                c1.caption(f"_{domain}_ • {ctype}")
                 c1.write(r.get('snippet', '')[:150] + "...")
                 
                 # Badge
-                if authority == "high":
+                if official:
                     c1.markdown("✅ :green-background[Official Source]")
-                elif authority == "medium":
-                    c1.markdown("🎓 :blue-background[Academic/Edu]")
-                else:
-                    c1.markdown("⚠️ :orange-background[Third-Party]")
-
+                elif domain.endswith(".edu"):
+                     c1.markdown("🎓 :blue-background[Academic]")
+                
                 # Select Action
                 if c2.button("Select", key=f"sel_{idx}"):
-                    st.session_state["selected_url"] = r['url']
-                    st.session_state["selected_auth"] = authority
+                    st.session_state["selected_url"] = final_url
+                    st.session_state["selected_auth"] = "high" if official else "medium"
                     st.rerun()
+                
+                if c2.button("Preview", key=f"prev_{idx}"):
+                    try:
+                        # Simple fetch for preview (sync for now)
+                        preview_resp = requests.get(final_url, timeout=5)
+                        if preview_resp.ok:
+                             st.code(preview_resp.text[:500] + "...")
+                        else:
+                             st.error(f"Preview failed: {preview_resp.status_code}")
+                    except Exception as e:
+                        st.error(f"Preview error: {e}")
 
     st.markdown("---")
 
