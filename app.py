@@ -302,11 +302,7 @@ def main_dashboard():
 
     # --- Main Content Area ---
     
-    if app_mode == "Create Resources":
-        if selected_name and selected_id: # Ensure sidebar selections were made
-            render_generator_ui(engine, selected_name, selected_id)
-        else:
-            st.info("Please select a curriculum in the sidebar to create resources.")
+
     st.markdown("---")
 
     # Fetch Data
