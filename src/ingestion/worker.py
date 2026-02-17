@@ -112,3 +112,15 @@ def ingest_sync(url: str, requested_by: str = "system", job_id: str | None = Non
         logger.exception("Ingest job failed: %s", e)
         mark_job_status(job_id, url, requested_by, status="failed", reason=str(e))
         return {"status": "failed", "reason": str(e)}
+
+def enqueue_ingest_job(url: str, requested_by: str):
+    """
+    Enqueue an ingestion job. 
+    In a real production setup, this would push to Redis/SQS.
+    For this demo, we'll log it. 
+    If you want immediate execution in dev, you could call ingest_sync here.
+    """
+    logger.info(f"ENQUEUEING JOB: {url} requested by {requested_by}")
+    # For demo purposes, we can try to run it immediately or just leave it logged.
+    # ingest_sync(url, requested_by) 
+

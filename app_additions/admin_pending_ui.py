@@ -1,23 +1,27 @@
 # app_additions/admin_pending_ui.py
 import streamlit as st
-import requests
-import os
+import logging
 
-API_BASE = os.environ.get("API_BASE", "http://localhost:8000")
+# Direct service assignment (Monolithic mode)
+# This avoids HTTP calls to localhost:8000 which requires a separate process
+try:
+    from src.ingestion.services import list_pending_jobs, approve_ingestion_job, reject_ingestion_job
+except ImportError:
+    st.error("Could not import ingestion services. Ensure you are running from the root directory.")
+    list_pending_jobs = None
 
 def render_admin_dashboard():
     st.title("Ingestion - Pending Manual Review")
+    st.caption("Internal Governance Console")
 
-    # Fetch pending jobs from backend endpoint
+    if not list_pending_jobs:
+        st.stop()
+
+    # Fetch pending jobs directly from DB
     try:
-        res = requests.get(f"{API_BASE}/api/admin/pending_jobs")
-        if res.status_code != 200:
-            st.error("Unable to fetch pending jobs: " + res.text)
-            return
-
-        jobs = res.json().get("jobs", [])
+        jobs = list_pending_jobs()
     except Exception as e:
-        st.error(f"Connection error: {e}")
+        st.error(f"Database error: {e}")
         return
 
     if not jobs:
@@ -25,40 +29,36 @@ def render_admin_dashboard():
     else:
         for job in jobs:
             with st.expander(f"Job {job['job_id']} - {job['source_url']}"):
-                st.write("Requested by:", job.get("requested_by"))
-                st.write("Decision reason:", job.get("decision_reason"))
-                if st.button(f"Preview {job['job_id']}", key=f"preview-{job['job_id']}"):
-                    try:
-                        pr = requests.get(f"{API_BASE}/api/ingest/preview", params={"url": job["source_url"]})
-                        if pr.status_code == 200:
-                            st.text_area("Preview snippet", pr.json().get("preview_snippet",""), height=200)
-                        else:
-                            st.error("Preview failed: " + pr.text)
-                    except Exception as e:
-                        st.error(f"Preview error: {e}")
-
-                col1, col2 = st.columns(2)
-                if col1.button(f"Approve {job['job_id']}", key=f"approve-{job['job_id']}"):
-                    try:
-                        r = requests.post(f"{API_BASE}/api/admin/approve", json={"job_id": job["job_id"]})
-                        if r.ok:
-                            st.success("Approved and enqueued")
-                            st.rerun()
-                        else:
-                            st.error("Approve failed: " + r.text)
-                    except Exception as e:
-                        st.error(f"Action error: {e}")
+                st.write(f"**Requested by:** {job.get('requested_by')}")
+                st.write(f"**Reason:** {job.get('decision_reason')}")
+                st.write(f"**Created:** {job.get('created_at')}")
                 
-                if col2.button(f"Reject {job['job_id']}", key=f"reject-{job['job_id']}"):
+                col1, col2 = st.columns(2)
+                
+                # Preview logic (could be added here if we want to fetch the snippet from DB or re-fetch)
+                # For now, simplistic.
+                
+                if col1.button(f"Approve", key=f"approve-{job['job_id']}"):
                     try:
-                        r = requests.post(f"{API_BASE}/api/admin/reject", json={"job_id": job["job_id"]})
-                        if r.ok:
-                            st.success("Rejected")
+                        ok = approve_ingestion_job(job['job_id'])
+                        if ok:
+                            st.success(f"Job {job['job_id']} Approved & Enqueued")
                             st.rerun()
                         else:
-                            st.error("Reject failed: " + r.text)
+                            st.error("Approval failed (ID not found?)")
                     except Exception as e:
-                        st.error(f"Action error: {e}")
+                        st.error(f"Error approving: {e}")
+                
+                if col2.button(f"Reject", key=f"reject-{job['job_id']}"):
+                    try:
+                        ok = reject_ingestion_job(job['job_id'])
+                        if ok:
+                            st.success(f"Job {job['job_id']} Rejected")
+                            st.rerun()
+                        else:
+                            st.error("Rejection failed")
+                    except Exception as e:
+                        st.error(f"Error rejecting: {e}")
 
 if __name__ == "__main__":
     render_admin_dashboard()
