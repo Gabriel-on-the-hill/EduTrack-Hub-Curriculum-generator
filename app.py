@@ -256,13 +256,17 @@ def main_dashboard():
         st.markdown("---")
 
         # Navigation
-        app_mode = st.radio("Navigation", ["Generator", "Ingestion", "Admin (Review)"])
+        app_mode = st.radio("Navigation", ["Create Resources", "Add Curriculum", "Review Dashboard"])
         st.markdown("---")
 
-        if app_mode == "Ingestion":
-             # We will render the ingestion UI here or in main area
-             pass
-        elif app_mode == "Admin (Review)": # Assuming "Admin (Review)" from radio maps to this logic
+        if app_mode == "Add Curriculum":
+             try:
+                 from app_additions.app_ingest_ui import add_curriculum_tab
+                 add_curriculum_tab(st.session_state.get("user_id", "local_dev_user"))
+             except ImportError:
+                 st.error("Ingestion UI module missing.")
+             return
+        elif app_mode == "Review Dashboard":
             try:
                 from app_additions.admin_pending_ui import render_admin_dashboard
                 render_admin_dashboard()
