@@ -26,6 +26,50 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# --- ACCESS CONTROL (GATEKEEPER) ---
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    # 1. Get Secret
+    password = st.secrets.get("ACCESS_CODE") or os.getenv("ACCESS_CODE")
+    
+    # 2. If no password set, allow access
+    if not password:
+        return True
+
+    # 3. Validation Logic
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == password:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # don't store password
+        else:
+            st.session_state["password_correct"] = False
+
+    # 4. State Management
+    if "password_correct" not in st.session_state:
+        # First run, show input
+        st.text_input(
+            "Enter Access Code 🔒", type="password", on_change=password_entered, key="password"
+        )
+        st.caption("This tool is in private beta. Please enter the code provided by the administrator.")
+        return False
+        
+    elif not st.session_state["password_correct"]:
+        # Password incorrect, show input + error
+        st.text_input(
+            "Enter Access Code 🔒", type="password", on_change=password_entered, key="password"
+        )
+        st.error("😕 Access denied. Please try again.")
+        return False
+        
+    else:
+        # Password correct
+        return True
+
+if not check_password():
+    st.stop()
+
+
 # --- CUSTOM CSS FOR PREMIUM LOOK ---
 st.markdown("""
 <style>
