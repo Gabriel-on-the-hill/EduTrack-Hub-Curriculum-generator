@@ -66,13 +66,12 @@ def ingest_sync(url: str, requested_by: str = "system", job_id: str | None = Non
         # Using Phase 2 heuristic_extract which returns List[ExtractedCompetency]
         competencies = heuristic_extract(text)
         
-        # 4. Persist curriculum and chunks (idempotent)
-        # store_curriculum_and_chunks in Phase 2 logic persists chunks from competencies list
-        store_curriculum_and_chunks(competencies)
-        
         # We need an ID for phase 3 linkage. Phase 2 implementation didn't return one explicitly.
         # We'll generate one or use a deterministic one based on checksum/url.
         curriculum_id = f"curr-{checksum[:12]}" 
+
+        # 4. Persist curriculum and chunks (idempotent)
+        store_curriculum_and_chunks(curriculum_id, url, competencies) 
 
         # 5. Standardize using LLM
         # Prepare raw_items for standardizer: map each competency description to source_chunk_id

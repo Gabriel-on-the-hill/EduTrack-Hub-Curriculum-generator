@@ -60,10 +60,64 @@ def store_snapshot(path: str) -> str:
     return dest
 
 
-def store_curriculum_and_chunks(competencies):
-    session.add(chunk)
-    session.commit()
-    session.close()
+def store_curriculum_and_chunks(curriculum_id: str, url: str, competencies: List[Any]):
+    """
+    Persist the curriculum and its competencies to the main tables used by app.py.
+    """
+    engine = create_engine(DATABASE_URL)
+    with engine.begin() as conn:
+        # 1. Insert Curriculum
+        # Check existence
+        exists = conn.execute(
+            text("SELECT 1 FROM curricula WHERE id = :id"),
+            {"id": curriculum_id}
+        ).fetchone()
+
+        if not exists:
+            # We need to infer country/grade/subject or use placeholders.
+            # For now, we'll derive from the URL or use defaults.
+            # In a real app, we'd use the ExtractorOutput metadata.
+            conn.execute(
+                text("""
+                    INSERT INTO curricula (id, country, grade, subject, status, source_authority)
+                    VALUES (:id, :country, :grade, :subject, 'active', :auth)
+                """),
+                {
+                    "id": curriculum_id,
+                    "country": "Imported",
+                    "grade": "General",
+                    "subject": "General",
+                    "auth": url
+                }
+            )
+
+        # 2. Insert Competencies
+        for i, comp in enumerate(competencies):
+            # comp is expected to be an object with title, description
+            # We assume it has a .title and .description attribute (ExtractedCompetency)
+            # Check existence using a composite key assumption or just random ID if needed.
+            # The schema uses 'id' as primary key.
+            comp_id = f"{curriculum_id}-c{i}"
+            
+            exists_c = conn.execute(
+                text("SELECT 1 FROM competencies WHERE id = :id"),
+                {"id": comp_id}
+            ).fetchone()
+            
+            if not exists_c:
+                conn.execute(
+                    text("""
+                        INSERT INTO competencies (id, curriculum_id, title, description, order_index)
+                        VALUES (:id, :cid, :title, :desc, :idx)
+                    """),
+                    {
+                        "id": comp_id,
+                        "cid": curriculum_id,
+                        "title": comp.title,
+                        "desc": comp.description or "",
+                        "idx": i
+                    }
+                )
 
 # --- Phase 3 Services ---
 from sqlalchemy import text

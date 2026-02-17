@@ -259,6 +259,13 @@ def main_dashboard():
         app_mode = st.radio("Navigation", ["Create Resources", "Add Curriculum", "Review Dashboard"])
         st.markdown("---")
 
+        with st.expander("Advanced Options"):
+             if st.button("🧹 Clear Cache"):
+                 st.cache_resource.clear()
+                 st.cache_data.clear()
+                 st.success("Cache Cleared!")
+                 st.rerun()
+
         if app_mode == "Add Curriculum":
              try:
                  from app_additions.app_ingest_ui import add_curriculum_tab
