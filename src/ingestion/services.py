@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 import shutil
 import os
-from typing import List, Dict
+from typing import List, Dict, Any
 from .schemas import StandardizedCompetency, CompetencyMetadata
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///demo.db")
