@@ -420,7 +420,7 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
             """, unsafe_allow_html=True)
             
             # Governance Badge
-            st.success("✅ **Governance:** PASSED (99.8% Grounding Score)")
+            st.success("✅ **Governance Verified**")
             
             # Download
             st.download_button(
