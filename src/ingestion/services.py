@@ -13,6 +13,7 @@ from datetime import datetime
 import shutil
 import os
 from typing import List, Dict
+from .schemas import StandardizedCompetency, CompetencyMetadata
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///demo.db")
 
