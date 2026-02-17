@@ -37,7 +37,7 @@ class DummyLLMProvider(LLMProviderInterface):
                 "original_text": clean[:400],
                 "standardized_text": f"Standardized: {clean[:200]}",
                 "action_verb": "Identify",
-                "content": clean.split()[:4],
+                "content": " ".join(clean.split()[:4]),
                 "context": "",
                 "bloom_level": "Understand",
                 "complexity_level": "Low",

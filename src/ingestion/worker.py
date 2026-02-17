@@ -13,7 +13,7 @@ from .services import (
     store_snapshot, persist_job_pending, store_curriculum_and_chunks,
     init_db
 )
-from .schemas import IngestionResult, ExtractorOutput
+from .schemas import ExtractorOutput
 
 logger = logging.getLogger(__name__)
 
