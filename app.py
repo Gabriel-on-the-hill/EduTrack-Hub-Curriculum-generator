@@ -260,7 +260,7 @@ def main_dashboard():
             st.rerun()
 
         # Navigation
-        app_mode = st.radio("Navigation", ["Generator", "Ingestion"])
+        app_mode = st.radio("Navigation", ["Generator", "Ingestion", "Admin (Review)"])
         st.markdown("---")
 
         if app_mode == "Ingestion":
@@ -303,6 +303,14 @@ def main_dashboard():
             add_curriculum_tab("current-user")
         except ImportError:
             st.error("Ingestion UI module missing.")
+        return
+
+    if app_mode == "Admin (Review)":
+        try:
+            from app_additions.admin_pending_ui import render_admin_dashboard
+            render_admin_dashboard()
+        except ImportError:
+            st.error("Admin UI module missing.")
         return
 
     # Header Section
