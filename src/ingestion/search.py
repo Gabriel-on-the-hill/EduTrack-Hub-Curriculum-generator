@@ -72,9 +72,43 @@ def _expand_queries(query: str) -> List[str]:
         f"{query} curriculum site:.gov",
         f"{query} syllabus site:.gov",
         f"{query} curriculum site:.edu",
+        f"{query} curriculum standards pdf",  # Stronger keyword fallback
         f"{query} syllabus",
-        f"{query}"
+        f"{query} education framework" # Better than just {query}
     ]
+
+def _is_relevant(r: dict, query_terms: List[str]) -> bool:
+    """
+    Heuristic to reject generic 'US Info' pages.
+    Result must contain at least one educational keyword or specific query usage.
+    """
+    text = (r.get("title", "") + " " + r.get("snippet", "")).lower()
+    url = r.get("url", "").lower()
+    
+    # definitive negative signals
+    if "wikipedia.org" in url or "census.gov" in url or "usa.gov" in url:
+        # exceptions: specific education subdomains (ignored for now for simplicity)
+        return False
+        
+    educational_keywords = {
+        "curriculum", "syllabus", "standards", "framework", 
+        "guide", "scope and sequence", "pacing", "learning objectives",
+        "lesson plan", "teacher", "student", "education", "pdf", "docs"
+    }
+    
+    # Check for intersection
+    hits = 0
+    for w in educational_keywords:
+        if w in text or w in url:
+            hits += 1
+            
+    # Also check for original query terms (simple check)
+    q_terms = [t.lower() for t in query_terms if len(t) > 3] # ignore 'us', 'uk'
+    for qt in q_terms:
+         if qt in text:
+             hits += 1
+             
+    return hits >= 2 # Require at least 2 relevant signals (e.g. "science" + "curriculum")
 
 def search_web(query: str, max_results: int = 10, region: str = "us-en", use_cache: bool = True) -> List[Dict]:
     """
@@ -88,6 +122,8 @@ def search_web(query: str, max_results: int = 10, region: str = "us-en", use_cac
     seen = set()
     ddgs = DDGS()
     queries = _expand_queries(query)
+    
+    query_terms = query.split()
 
     for q in queries:
         # Respect small delay between attempts
@@ -103,6 +139,15 @@ def search_web(query: str, max_results: int = 10, region: str = "us-en", use_cac
                 if url in seen:
                     continue
                 seen.add(url)
+                
+                # Check relevance BEFORE HEAD check to save time
+                temp_res = {
+                    "title": r.get("title") or "",
+                    "snippet": r.get("body") or r.get("snippet") or "",
+                    "url": url
+                }
+                if not _is_relevant(temp_res, query_terms):
+                    continue
 
                 # lightweight validation (HEAD)
                 info = _validate_link(url)
@@ -112,9 +157,9 @@ def search_web(query: str, max_results: int = 10, region: str = "us-en", use_cac
 
                 domain = urlparse(info["final_url"]).hostname or ""
                 result = {
-                    "title": r.get("title") or "",
+                    "title": temp_res["title"],
                     "url": url,
-                    "snippet": r.get("body") or r.get("snippet") or "",
+                    "snippet": temp_res["snippet"],
                     "domain": domain,
                     "official_hint": _is_official_domain(url),
                     "final_url": info["final_url"],
@@ -132,13 +177,24 @@ def search_web(query: str, max_results: int = 10, region: str = "us-en", use_cac
     if not collected:
         # try very broad search without filetype or head-check (allow HTML preview)
         time.sleep(SEARCH_DELAY_SECONDS)
+        fallback_q = f"{query} curriculum education" # Ensure we don't just search "US"
         try:
-            for r in ddgs.text(query, region=region, max_results=max_results):
+            for r in ddgs.text(fallback_q, region=region, max_results=max_results):
                 url_raw = r.get("href") or r.get("url")
                 url = _normalize_url(url_raw)
                 if not url or url in seen:
                     continue
-                collected.append({"title": r.get("title", ""), "url": url, "snippet": r.get("body",""), "domain": urlparse(url).hostname or "", "official_hint": _is_official_domain(url)})
+                    
+                # Basic check only
+                if "wikipedia" in url: continue
+                
+                collected.append({
+                    "title": r.get("title", ""), 
+                    "url": url, 
+                    "snippet": r.get("body",""), 
+                    "domain": urlparse(url).hostname or "", 
+                    "official_hint": _is_official_domain(url)
+                })
                 if len(collected) >= max_results:
                     break
         except Exception:
