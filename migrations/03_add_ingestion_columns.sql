@@ -1,0 +1,32 @@
+-- migrations/03_add_ingestion_columns.sql
+-- Postgres migration for Supabase
+
+ALTER TABLE curricula ADD COLUMN source_url TEXT;
+ALTER TABLE curricula ADD COLUMN snapshot_path TEXT;
+ALTER TABLE curricula ADD COLUMN checksum TEXT;
+ALTER TABLE curricula ADD COLUMN authority_level TEXT;
+ALTER TABLE curricula ADD COLUMN license_tag TEXT;
+ALTER TABLE curricula ADD COLUMN ingested_at TIMESTAMP DEFAULT now();
+ALTER TABLE curricula ADD COLUMN extraction_confidence FLOAT;
+ALTER TABLE curricula ADD COLUMN status TEXT DEFAULT 'pending';
+
+CREATE TABLE IF NOT EXISTS curriculum_chunks (
+  chunk_id TEXT PRIMARY KEY,
+  curriculum_id TEXT REFERENCES curricula(id),
+  page_range TEXT,
+  text TEXT,
+  extraction_method TEXT,
+  confidence FLOAT,
+  checksum TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ingestion_jobs (
+  job_id TEXT PRIMARY KEY,
+  source_url TEXT,
+  requested_by TEXT,
+  status TEXT,
+  created_at TIMESTAMP DEFAULT now(),
+  last_updated TIMESTAMP DEFAULT now(),
+  job_payload JSONB,
+  decision_reason TEXT
+);

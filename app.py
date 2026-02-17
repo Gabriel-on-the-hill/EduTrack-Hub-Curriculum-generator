@@ -252,34 +252,52 @@ def main_dashboard():
         st.caption("v1.0.0 Global Production")
         st.markdown("---")
         
-        try:
-            curricula = fetch_curricula(engine)
-            if not curricula:
-                st.warning("Database Empty. Please seed data.")
-                st.stop()
+        # Navigation
+        app_mode = st.radio("Navigation", ["Generator", "Ingestion"])
+        st.markdown("---")
+
+        if app_mode == "Ingestion":
+             # We will render the ingestion UI here or in main area
+             pass
+        else:
+            try:
+                curricula = fetch_curricula(engine)
+                if not curricula:
+                    st.warning("Database Empty. Please seed data.")
+                    st.stop()
+                    
+                # Curriculum Selector
+                curriculum_map = {f"{c['country']} • {c['subject']} {c['grade']}": c['id'] for c in curricula}
+                selected_name = st.selectbox("Active Curriculum", list(curriculum_map.keys()))
+                selected_id = curriculum_map[selected_name]
                 
-            # Curriculum Selector
-            curriculum_map = {f"{c['country']} • {c['subject']} {c['grade']}": c['id'] for c in curricula}
-            selected_name = st.selectbox("Active Curriculum", list(curriculum_map.keys()))
-            selected_id = curriculum_map[selected_name]
-            
-            st.markdown("### Configuration")
-            output_format = st.radio("Document Type", ["Teacher Guide", "Student Worksheet", "Exam Paper"], index=0)
-            
-            # Clarity update: Rename to 'Target Proficiency' with tooltip
-            difficulty = st.select_slider(
-                "Target Proficiency", 
-                options=["Foundational", "Proficient", "Advanced", "Expert"], 
-                value="Proficient",
-                help="Adjusts vocabulary complexity and depth of analysis."
-            )
-            
-        except Exception as e:
-            st.error(f"System Error: {str(e)}")
-            st.stop()
+                st.markdown("### Configuration")
+                output_format = st.radio("Document Type", ["Teacher Guide", "Student Worksheet", "Exam Paper"], index=0)
+                
+                # Clarity update: Rename to 'Target Proficiency' with tooltip
+                difficulty = st.select_slider(
+                    "Target Proficiency", 
+                    options=["Foundational", "Proficient", "Advanced", "Expert"], 
+                    value="Proficient",
+                    help="Adjusts vocabulary complexity and depth of analysis."
+                )
+                
+            except Exception as e:
+                st.error(f"System Error: {str(e)}")
+                st.stop()
 
     # --- Main Content Area ---
     
+    # --- Main Content Area ---
+    
+    if app_mode == "Ingestion":
+        try:
+            from app_additions.app_ingest_ui import add_curriculum_tab
+            add_curriculum_tab("current-user")
+        except ImportError:
+            st.error("Ingestion UI module missing.")
+        return
+
     # Header Section
     st.markdown(f"# {selected_name}")
     st.markdown(f"**Authority:** Verified Source • **Region:** {selected_name.split('•')[0].strip()}")
