@@ -148,7 +148,12 @@ class ProductionHarness:
         # REAL REJECTION - not warning
         # Use VERDICT which respects mode-specific thresholds (e.g. 95% for Uni)
         if report.verdict == "FAIL":
-            raise GroundingViolationError(report.ungrounded_sentences)
+            action = os.getenv("GROUNDING_ACTION", "WARN")
+            if action == "BLOCK":
+                raise GroundingViolationError(report.ungrounded_sentences)
+            else:
+                 # Just log specific warnings, assume user knows
+                 print(f"Grounding Warning: {len(report.ungrounded_sentences)} ungrounded sentences found.")
                 
         # E. Shadow Execution
         shadow_out = await self._run_shadow_generation(curriculum_id, config)

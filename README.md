@@ -89,9 +89,10 @@ Follow these steps to deploy your curriculum generator to `curriculum.yourwebsit
    *(Note: If `AI_PROVIDER` is missing, it defaults to Google Gemini)*
    
    **(Optional) Safety Controls:**
-   Adjust strictness of hallucinations checks (Default: 0.7):
+   Adjust strictness of hallucinations checks:
    ```toml
-   GROUNDING_THRESHOLD = 0.75  # Higher = Stricter (kils creativity)
+   GROUNDING_THRESHOLD = 0.75  # 0.0-1.0 (Higher = Stricter)
+   GROUNDING_ACTION = "WARN"   # "WARN" or "BLOCK" (Default: "WARN")
    ```
 
 ### 4. Connect Custom Domain
