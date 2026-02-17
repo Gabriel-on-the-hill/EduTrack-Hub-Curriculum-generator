@@ -289,32 +289,30 @@ def main_dashboard():
     # Fetch Data
     competencies = fetch_competencies(engine, selected_id)
     
-    # 2-Column Layout for Selection
-    col_nav, col_details = st.columns([1, 2])
+    # --- PROPOSED SINGLE COLUMN LAYOUT ---
     
-    with col_nav:
-        st.subheader("Select Topic")
-        # Clean list visual
-        topic = st.radio("Learning Objectives", [c['title'] for c in competencies], label_visibility="collapsed")
+    # 1. Top Control Bar (Full Width)
+    # Replaces the left sidebar column for better mobile/desktop use
+    topic = st.selectbox(
+        "Select Learning Objective", 
+        [c['title'] for c in competencies],
+        index=0
+    )
+    
+    # 2. Context Card (Full Width)
+    selected_comp = next(c for c in competencies if c['title'] == topic)
+    with st.container(border=True):
+        st.caption("SELECTED OBJECTIVE")
+        st.markdown(f"### {selected_comp['title']}")
+        st.markdown(f"_{selected_comp['description']}_")
         
-        st.markdown("---")
-        if st.button("Generate Content", use_container_width=True, type="primary"):
-            run_generation(topic, output_format, difficulty, competencies, selected_id)
+    # 3. Action Button (Full Width)
+    if st.button("✨ Generate Content", type="primary", use_container_width=True):
+        run_generation(topic, output_format, difficulty, competencies, selected_id)
 
-    with col_details:
-        selected_comp = next(c for c in competencies if c['title'] == topic)
-        
-        st.markdown(f"""
-        <div class="metric-card">
-            <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Selected Objective</small>
-            <h3 style="margin-top: 8px;">{selected_comp['title']}</h3>
-            <p style="color: #475569; line-height: 1.6;">{selected_comp['description']}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Placeholder for analytics or more detail
-        st.markdown("### Source Verification")
-        st.success("✅ Verified against 2024 National Standards.")
+    # 4. Results Area (Full Width)
+    # The 'run_generation' function will need to output here.
+    # We moved the logic inside run_generation to use st.container instead of HTML div.
 
 # --- PROVISIONING ---
 @st.cache_resource
@@ -413,11 +411,9 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
             st.markdown("---")
             st.subheader("Generated Artifact")
             
-            st.markdown(f"""
-            <div style="background: white; border: 1px solid #e2e8f0; padding: 40px; border-radius: 4px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                {payload.content_markdown}
-            </div>
-            """, unsafe_allow_html=True)
+            # Use native container with scroll for better UX
+            with st.container(height=600, border=True):
+                st.markdown(payload.content_markdown)
             
             # Governance Badge
             st.success("✅ **Governance Verified**")
@@ -428,7 +424,7 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
                 payload.content_markdown,
                 file_name=f"{topic}.md"
             )
-
+            
         except Exception as e:
             status.update(label="❌ Generation Failed", state="error")
             st.error(f"Engine Error: {str(e)}")
