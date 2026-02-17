@@ -1,5 +1,5 @@
 """
-EduTrack Demo App
+EduTrack Hub
 Streamlit interface for curriculum content generation
 
 Run with: streamlit run app.py
@@ -20,7 +20,7 @@ except ImportError:
 
 # Page config - must be first
 st.set_page_config(
-    page_title="EduTrack Hub Generator",
+    page_title="EduTrack Hub",
     page_icon="⚡", # Minimalist icon
     layout="wide",
     initial_sidebar_state="expanded"
@@ -51,7 +51,7 @@ def check_password():
         st.text_input(
             "Enter Access Code 🔒", type="password", on_change=password_entered, key="password"
         )
-        st.caption("This tool is in private beta. Please enter the code provided by the administrator.")
+        st.caption("This tool is restricted. Please enter the code provided by the administrator.")
         return False
         
     elif not st.session_state["password_correct"]:
@@ -154,7 +154,7 @@ def get_db_engine():
     
     # FALLBACK: Use local SQLite if no real DB configured
     if not db_url:
-        st.warning("⚠️ Using local demo database (SQLite). Data will reset on restart.")
+        st.warning("⚠️ Using local database (SQLite).")
         db_url = "sqlite:///demo.db"
     
     engine = create_engine(db_url)
@@ -170,7 +170,7 @@ def get_db_engine():
                     # Tables don't exist or empty, run scripts
                     seed_sqlite(conn)
         except Exception as e:
-            st.error(f"Failed to seed demo DB: {e}")
+            st.error(f"Failed to seed DB: {e}")
             
     return engine
 
@@ -248,16 +248,9 @@ def main_dashboard():
         
     # --- Sidebar ---
     with st.sidebar:
-        st.markdown("### EduTrack **Hub Generator**")
+        st.markdown("### EduTrack **Hub**")
         st.caption("v1.0.0 Global Production")
         st.markdown("---")
-        
-        # Dev Helper: Clear Cache
-        if st.sidebar.button("🧹 Clear Cache (Dev)"):
-            st.cache_resource.clear()
-            st.cache_data.clear()
-            st.success("Cache Cleared!")
-            st.rerun()
 
         # Navigation
         app_mode = st.radio("Navigation", ["Generator", "Ingestion", "Admin (Review)"])
@@ -266,7 +259,14 @@ def main_dashboard():
         if app_mode == "Ingestion":
              # We will render the ingestion UI here or in main area
              pass
-        else:
+        elif app_mode == "Admin (Review)": # Assuming "Admin (Review)" from radio maps to this logic
+            try:
+                from app_additions.admin_pending_ui import render_admin_dashboard
+                render_admin_dashboard()
+            except ImportError:
+                st.error("Admin UI module missing. Please ensure 'app_additions/admin_pending_ui.py' exists.")
+            return # Stop further rendering of the main dashboard for Admin mode
+        else: # This 'else' now covers "Generator"
             try:
                 curricula = fetch_curricula(engine)
                 if not curricula:
@@ -295,28 +295,11 @@ def main_dashboard():
 
     # --- Main Content Area ---
     
-    # --- Main Content Area ---
-    
-    if app_mode == "Ingestion":
-        try:
-            from app_additions.app_ingest_ui import add_curriculum_tab
-            add_curriculum_tab("current-user")
-        except ImportError:
-            st.error("Ingestion UI module missing.")
-        return
-
-    if app_mode == "Admin (Review)":
-        try:
-            from app_additions.admin_pending_ui import render_admin_dashboard
-            render_admin_dashboard()
-        except ImportError:
-            st.error("Admin UI module missing.")
-        return
-
-    # Header Section
-    st.markdown(f"# {selected_name}")
-    st.markdown(f"**Authority:** Verified Source • **Region:** {selected_name.split('•')[0].strip()}")
-    
+    if app_mode == "Create Resources":
+        if selected_name and selected_id: # Ensure sidebar selections were made
+            render_generator_ui(engine, selected_name, selected_id)
+        else:
+            st.info("Please select a curriculum in the sidebar to create resources.")
     st.markdown("---")
 
     # Fetch Data
