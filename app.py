@@ -246,6 +246,9 @@ def main_dashboard():
         st.error("Connection Error: Database unavailable.")
         st.stop()
         
+    selected_id = None
+    selected_name = None
+
     # --- Sidebar ---
     with st.sidebar:
         st.markdown("### EduTrack **Hub**")
@@ -303,6 +306,9 @@ def main_dashboard():
     st.markdown("---")
 
     # Fetch Data
+    if not selected_id:
+        return
+
     competencies = fetch_competencies(engine, selected_id)
     
     # --- PROPOSED SINGLE COLUMN LAYOUT ---
