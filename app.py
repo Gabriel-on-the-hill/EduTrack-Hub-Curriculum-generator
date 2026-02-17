@@ -270,8 +270,8 @@ def main_dashboard():
              try:
                  from app_additions.app_ingest_ui import add_curriculum_tab
                  add_curriculum_tab(st.session_state.get("user_id", "local_dev_user"))
-             except ImportError:
-                 st.error("Ingestion UI module missing.")
+             except ImportError as e:
+                 st.error(f"Ingestion UI module missing: {e}")
              return
         elif app_mode == "Review Dashboard":
             try:
