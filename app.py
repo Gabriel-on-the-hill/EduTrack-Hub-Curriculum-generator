@@ -252,6 +252,13 @@ def main_dashboard():
         st.caption("v1.0.0 Global Production")
         st.markdown("---")
         
+        # Dev Helper: Clear Cache
+        if st.sidebar.button("🧹 Clear Cache (Dev)"):
+            st.cache_resource.clear()
+            st.cache_data.clear()
+            st.success("Cache Cleared!")
+            st.rerun()
+
         # Navigation
         app_mode = st.radio("Navigation", ["Generator", "Ingestion"])
         st.markdown("---")
