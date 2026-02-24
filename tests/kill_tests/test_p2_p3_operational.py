@@ -5,6 +5,7 @@ Purpose: Verify operational resilience, determinism, and monitoring.
 """
 
 import pytest
+import asyncio
 import time
 from unittest.mock import Mock, patch
 from src.production.harness import ProductionHarness
@@ -41,8 +42,13 @@ class TestOperational:
         """
         harness._run_generation = Mock(side_effect=TimeoutError("Mock Timeout"))
         
-        with pytest.raises(TimeoutError): # Or custom fallback exception
-            harness.generate_artifact("test-timeout", Mock(), valid_provenance)
+        mock_config = Mock()
+        mock_config.grade = "Grade 9"
+        mock_config.jurisdiction = "National"
+        mock_config.topic_title = "Biology"
+        
+        with pytest.raises(TimeoutError):
+            asyncio.run(harness.generate_artifact("test-timeout", mock_config, valid_provenance))
 
     def test_kt_f1_determinism(self, harness):
         """
@@ -60,11 +66,20 @@ class TestOperational:
         KT-G1: Latency Spike
         """
         start = time.time()
-        # Mock fast generation
-        harness._run_generation = Mock(return_value=Mock(content_markdown="# Fast", metrics={}, metadata={}))
+        # Mock fast generation with async wrapper
+        mock_output = Mock(content_markdown="# Fast", metrics={}, metadata={})
+        async def fast_gen(*a, **kw):
+            return mock_output
+        harness._run_generation = fast_gen
         # Mock grounding to PASS so we just measure time
         harness.grounding.verify_artifact = Mock(return_value=Mock(is_clean=True))
         
-        harness.generate_artifact("test-latency", Mock(), valid_provenance)
+        mock_config = Mock()
+        mock_config.grade = "Grade 9"
+        mock_config.jurisdiction = "National"
+        mock_config.topic_title = "Biology"
+        
+        with patch('src.production.harness.extract_topics', return_value=[]):
+            asyncio.run(harness.generate_artifact("test-latency", mock_config, valid_provenance))
         duration = (time.time() - start) * 1000
-        assert duration < 5000 # Loose check, real check needs tighter mocks or real models
+        assert duration < 5000

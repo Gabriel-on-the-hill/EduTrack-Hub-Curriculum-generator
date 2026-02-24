@@ -192,8 +192,7 @@ def search_web(query: str, max_results: int = 10, region: str = "us-en", use_cac
                     "title": r.get("title", ""), 
                     "url": url, 
                     "snippet": r.get("body",""), 
-                    "domain": urlparse(url).hostname or "", 
-                    "official_hint": _is_official_domain(url)
+                    "domain": urlparse(url).hostname or ""
                 })
                 if len(collected) >= max_results:
                     break

@@ -34,6 +34,7 @@ def mock_embedding_provider():
         return embeddings
         
     provider.embed.side_effect = fake_embed
+    provider.name.return_value = "mock_provider"
     return provider
 
 def test_k12_fails_with_ungrounded_sentence(mock_embedding_provider):

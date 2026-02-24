@@ -5,6 +5,7 @@ Purpose: Verify that Shadow Logs are persisted and policy-compliant.
 """
 
 import pytest
+import asyncio
 import json
 import os
 import shutil
@@ -38,13 +39,19 @@ class TestShadowPersistence:
         
         with patch('src.production.harness.fetch_competencies', return_value=[{"id": "1", "text": "Bio"}]), \
              patch('src.production.harness.fetch_curriculum_mode', return_value="k12"), \
-             patch('src.production.harness.extract_topics', side_effect=[["a"], ["a", "z"]]): # 50% extra
+             patch('src.production.harness.extract_topics', side_effect=[["a"], ["a", "z"]]), \
+             patch.dict('os.environ', {'HALLUCINATION_ACTION': 'BLOCK'}): # 50% extra
+
+            mock_config = Mock()
+            mock_config.grade = "Grade 9"
+            mock_config.jurisdiction = "National"
+            mock_config.topic_title = "Biology"
 
             try:
-                harness.generate_artifact("test-persist", Mock(), valid_provenance)
+                asyncio.run(harness.generate_artifact("test-persist", mock_config, valid_provenance))
                 pytest.fail("Should have raised HallucinationBlockError")
             except Exception as e:
-                # Check if it's the right error (string check to avoid class mismatch issues during dev)
+                # Check if it's the right error
                 assert "HallucinationBlockError" in type(e).__name__ 
                 assert "Shadow hallucination detected" in str(e)
             

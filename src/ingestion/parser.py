@@ -3,17 +3,34 @@ import hashlib
 import requests
 import tempfile
 from bs4 import BeautifulSoup
-from typing import Tuple
+
 import os
 
 
+MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB limit
+
 def download_file(url: str) -> str:
-    response = requests.get(url, timeout=30)
+    response = requests.get(url, timeout=30, stream=True)
     response.raise_for_status()
+
+    # Check Content-Length header first if available
+    content_length = response.headers.get('Content-Length')
+    if content_length and int(content_length) > MAX_FILE_SIZE_BYTES:
+        raise ValueError(f"File at {url} exceeds the 20MB size limit (reported {content_length} bytes)")
 
     suffix = ".pdf" if "pdf" in response.headers.get("content-type", "") else ".html"
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    tmp.write(response.content)
+    
+    downloaded_size = 0
+    for chunk in response.iter_content(chunk_size=8192):
+        if chunk:
+            downloaded_size += len(chunk)
+            if downloaded_size > MAX_FILE_SIZE_BYTES:
+                tmp.close()
+                os.unlink(tmp.name)
+                raise ValueError(f"File at {url} exceeds the 20MB size limit during download")
+            tmp.write(chunk)
+            
     tmp.close()
     return tmp.name
 

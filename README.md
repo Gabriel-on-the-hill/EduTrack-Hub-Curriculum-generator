@@ -42,11 +42,11 @@ tests/
 ## Phase Status
 
 - [x] Phase 0: Spec Frozen
-- [ ] Phase 1: Schemas + Validation (In Progress)
-- [ ] Phase 2: LangGraph State Machine
-- [ ] Phase 3: Ingestion Swarm
-- [ ] Phase 4: Synthetic Simulators  
-- [ ] Phase 5: Generation Layer
+- [x] Phase 1: Schemas + Validation
+- [x] Phase 2: LangGraph State Machine
+- [x] Phase 3: Ingestion Swarm
+- [x] Phase 4: Synthetic Simulators  
+- [x] Phase 5: Generation Layer
 - [ ] Phase 6: Kill Tests + Launch
 
 ## Deployment Guide (Option 1A: Subdomain Strategy)
@@ -61,7 +61,7 @@ Follow these steps to deploy your curriculum generator to `curriculum.yourwebsit
 1. Go to [share.streamlit.io](https://share.streamlit.io/).
 2. Click **New app**.
 3. Select your GitHub repo: `edutrack-generator`.
-4. Set **Main file path** to `src/Home.py` (or `Home.py` if in root).
+4. Set **Main file path** to `app.py`.
 5. Click **Deploy!**.
 
 ### 3. Configure Secrets
@@ -89,10 +89,11 @@ Follow these steps to deploy your curriculum generator to `curriculum.yourwebsit
    *(Note: If `AI_PROVIDER` is missing, it defaults to Google Gemini)*
    
    **(Optional) Safety Controls:**
-   Adjust strictness of hallucinations checks:
+   Adjust strictness of hallucination checks:
    ```toml
    GROUNDING_THRESHOLD = 0.75  # 0.0-1.0 (Higher = Stricter)
    GROUNDING_ACTION = "WARN"   # "WARN" or "BLOCK" (Default: "WARN")
+   HALLUCINATION_ACTION = "WARN"  # "WARN" or "BLOCK" (Default: "WARN")
    ```
 
 ### 4. Connect Custom Domain
@@ -110,5 +111,5 @@ Follow these steps to deploy your curriculum generator to `curriculum.yourwebsit
 pip install -r requirements.txt
 
 # Run the app
-streamlit run src/Home.py
+streamlit run app.py
 ```

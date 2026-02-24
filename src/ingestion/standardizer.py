@@ -77,7 +77,7 @@ def standardize_batch(raw_items: List[Dict[str, Any]], llm_provider=None) -> Lis
             if start != -1 and end != -1:
                 try:
                     parsed = json.loads(txt[start:end])
-                except:
+                except Exception:
                     parsed = {}
             else:
                 logger.exception("Cannot parse LLM output for standardization: %s", e)

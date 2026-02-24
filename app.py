@@ -181,9 +181,14 @@ def seed_sqlite(conn):
         CREATE TABLE IF NOT EXISTS curricula (
             id TEXT PRIMARY KEY,
             country TEXT NOT NULL,
+            country_code TEXT,
+            jurisdiction_level TEXT,
+            jurisdiction_name TEXT,
             grade TEXT NOT NULL,
             subject TEXT NOT NULL,
             status TEXT DEFAULT 'active',
+            confidence_score REAL,
+            source_url TEXT,
             source_authority TEXT
         );
     """))
@@ -201,9 +206,12 @@ def seed_sqlite(conn):
     
     # 2. Seed Data (Use INSERT OR IGNORE)
     conn.execute(text("""
-        INSERT OR IGNORE INTO curricula (id, country, grade, subject, source_authority) VALUES 
-        ('ng-bio-ss1', 'Nigeria', 'SS1', 'Biology', 'NERDC'),
-        ('ca-math-09', 'Canada (Ontario)', '9', 'Mathematics', 'Ministry of Education');
+        INSERT OR IGNORE INTO curricula (
+            id, country, country_code, jurisdiction_level, jurisdiction_name, 
+            grade, subject, source_authority
+        ) VALUES 
+        ('ng-bio-ss1', 'Nigeria', 'NG', 'National', 'NERDC', 'SS1', 'Biology', 'NERDC'),
+        ('ca-math-09', 'Canada', 'CA', 'Provincial', 'Ontario Ministry of Education', '9', 'Mathematics', 'Ministry of Education');
     """))
     
     conn.execute(text("""
@@ -431,8 +439,16 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
                 "session": "streamlit"
             }
             
-            # Call the full production pipeline (governance + grounding + shadow checks)
-            payload = asyncio.run(harness.generate_artifact(curriculum_id, config, provenance))
+            # Call the full production pipeline safely in Streamlit's event loop
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+            payload = loop.run_until_complete(
+                harness.generate_artifact(curriculum_id, config, provenance)
+            )
             
             status.update(label="✅ Generation Complete", state="complete", expanded=False)
             

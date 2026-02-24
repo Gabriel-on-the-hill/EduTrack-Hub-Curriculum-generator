@@ -7,19 +7,25 @@ from sqlalchemy import (
     create_engine,
     JSON,
 )
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from datetime import datetime
 import shutil
 import os
 from typing import List, Dict, Any
 from .schemas import StandardizedCompetency, CompetencyMetadata
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///demo.db")
+def get_engine():
+    """Lazy engine factory — avoids DB connection on module import."""
+    url = os.getenv("DATABASE_URL", "sqlite:///demo.db")
+    return create_engine(url)
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine)
-Base = declarative_base()
+def get_db_session():
+    """Create a new session using a fresh engine."""
+    engine = get_engine()
+    return sessionmaker(bind=engine)()
+
+class Base(DeclarativeBase):
+    pass
 
 
 class IngestionJob(Base):
@@ -41,11 +47,11 @@ class CurriculumChunk(Base):
 
 
 def init_db():
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(get_engine())
 
 
 def persist_job_pending(url: str):
-    session = SessionLocal()
+    session = get_db_session()
     job = IngestionJob(source_url=url, status="pending")
     session.add(job)
     session.commit()
@@ -64,7 +70,7 @@ def store_curriculum_and_chunks(curriculum_id: str, url: str, competencies: List
     """
     Persist the curriculum and its competencies to the main tables used by app.py.
     """
-    engine = create_engine(DATABASE_URL)
+    engine = get_engine()
     with engine.begin() as conn:
         # 1. Insert Curriculum
         # Check existence
@@ -127,7 +133,7 @@ def store_standardized_competencies(curriculum_id: str, standardized_list: List[
     """
     Idempotent insert of standardized competencies for a curriculum.
     """
-    engine = create_engine(DATABASE_URL) # create new engine instance to avoid sharing issues or use global
+    engine = get_engine()
     with engine.begin() as conn:
         for sc in standardized_list:
             exists = conn.execute(
@@ -159,7 +165,7 @@ def store_standardized_competencies(curriculum_id: str, standardized_list: List[
                 )
 
 def store_competency_metadata(metadata_map: Dict[str, CompetencyMetadata]):
-    engine = create_engine(DATABASE_URL)
+    engine = get_engine()
     with engine.begin() as conn:
         for sid, meta in metadata_map.items():
             exists = conn.execute(
@@ -190,7 +196,7 @@ def store_competency_metadata(metadata_map: Dict[str, CompetencyMetadata]):
 def list_pending_jobs(limit: int = 100):
     # This assumes IngestionJob model exists and has these fields
     # In a real app we would query the ORM model
-    engine = create_engine(DATABASE_URL)
+    engine = get_engine()
     
     with engine.connect() as conn:
         # Check if table exists first (for robustness in dev env)
@@ -213,7 +219,7 @@ def list_pending_jobs(limit: int = 100):
         return result
 
 def approve_ingestion_job(job_id: str) -> bool:
-    engine = create_engine(DATABASE_URL)
+    engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
             text("UPDATE ingestion_jobs SET status = 'approved' WHERE id = :id"),
@@ -226,7 +232,7 @@ def approve_ingestion_job(job_id: str) -> bool:
     return True
 
 def reject_ingestion_job(job_id: str) -> bool:
-    engine = create_engine(DATABASE_URL)
+    engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
             text("UPDATE ingestion_jobs SET status = 'rejected' WHERE id = :id"),

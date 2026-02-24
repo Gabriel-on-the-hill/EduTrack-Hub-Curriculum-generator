@@ -11,6 +11,9 @@ Invariants:
 
 from dataclasses import dataclass, field
 from typing import Literal
+import logging
+import re
+import numpy as np
 
 from src.synthetic.embeddings import get_embedding_provider
 from src.synthetic.schemas import TopicWeight  # Reusing similar concept if needed, or just str
@@ -60,11 +63,9 @@ class GroundingVerifier:
         # 0.8 is too high for bag-of-words (requires near-duplicate text)
         if "jaccard-only" in self.embedding_provider.name():
             self.similarity_threshold = 0.3
-            import logging
             logging.info(f"GroundingVerifier: Using Jaccard provider, threshold={self.similarity_threshold}")
         else:
             self.similarity_threshold = similarity_threshold
-            import logging
             logging.info(f"GroundingVerifier: Using {self.embedding_provider.name()}, threshold={self.similarity_threshold}")
     
     def verify_artifact(
@@ -114,7 +115,6 @@ class GroundingVerifier:
             is_grounded = best_match['score'] >= self.similarity_threshold
             
             # Debug logging
-            import logging
             if not is_grounded:
                 logging.warning(f"Ungrounded sentence (score={best_match['score']:.3f}, threshold={self.similarity_threshold}): {sentence[:60]}...")
             
@@ -137,7 +137,6 @@ class GroundingVerifier:
         is_jaccard = "jaccard-only" in self.embedding_provider.name()
         
         if is_jaccard:
-            import logging
             logging.info(f"Jaccard provider: {len(ungrounded)} ungrounded sentences logged as warnings, verdict=PASS")
             verdict = "PASS"  # Warning-only mode for bag-of-words
         elif mode == "k12":
@@ -155,11 +154,10 @@ class GroundingVerifier:
         )
     
     def _split_sentences(self, text: str) -> list[str]:
-        """Simple sentence splitter."""
-        # TODO: Use specific NLP splitter in production
-        import re
-        # Basic split by .!? followed by space or end of line
-        raw = re.split(r'(?<=[.!?])\s+', text)
+        """Improved sentence splitter using regex limits for better boundary detection without NLTK."""
+        # Split by .!? followed by space and an uppercase letter, or end of string.
+        # This prevents splitting on common abbreviations like e.g., i.e.
+        raw = re.split(r'(?<=[.!?])\s+(?=[A-Z])|(?<=[.!?])\n', text)
         return [s.strip() for s in raw if len(s.strip()) > 10]  # Ignore tiny fragments
     
     def _find_best_match(self, sent_emb: list[float], comp_embs: list[list[float]], competencies: list[dict]) -> dict:

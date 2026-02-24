@@ -1,15 +1,18 @@
 # tests/ingestion/test_search_api.py
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from src.ingestion.search_api import router
 from unittest.mock import patch
 
-client = TestClient(router)
+app = FastAPI()
+app.include_router(router)
+client = TestClient(app)
 
 def test_search_api_results():
     # Mock the search_web call to avoid real network
     with patch("src.ingestion.search_api.search_web") as mock_search:
         mock_search.return_value = [
-            {"title": "Test Curr", "url": "https://gov.uk/curr.pdf", "snippet": "Test", "domain": "gov.uk"}
+            {"title": "Test Curr", "url": "https://www.education.gov.uk/curr.pdf", "snippet": "Test", "domain": "gov.uk"}
         ]
         
         response = client.post("/api/ingest/search", json={"query": "test"})

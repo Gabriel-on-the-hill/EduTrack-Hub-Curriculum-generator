@@ -49,6 +49,10 @@ class SentenceTransformerProvider:
         embeddings = self.model.encode(texts, convert_to_numpy=True)
         return embeddings.tolist()
     
+    def name(self) -> str:
+        """Return model name for grounding verifier compatibility."""
+        return self._model_name
+    
     def cosine_distance(self, a: str, b: str) -> float:
         """
         Compute cosine distance (1 - similarity) between two texts.
@@ -84,6 +88,10 @@ class MockEmbeddingProvider:
             vec = [(h >> i) & 1 for i in range(128)]
             embeddings.append(vec)
         return embeddings
+    
+    def name(self) -> str:
+        """Return model name for grounding verifier compatibility."""
+        return self._model_name
     
     def cosine_distance(self, a: str, b: str) -> float:
         """Simple distance: 0 if same, 1 if different."""

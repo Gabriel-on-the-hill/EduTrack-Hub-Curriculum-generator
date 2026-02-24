@@ -65,9 +65,13 @@ def seeded_curriculum():
     Returns a consistent curriculum object for deterministic testing.
     Represents a verified Phase 4 artifact.
     """
-    from src.synthetic.schemas import SyntheticCurriculumOutput
-    return SyntheticCurriculumOutput.model_construct(
-        curriculum_id="aa-bb-cc-dd",
+    from src.synthetic.schemas import SyntheticCurriculumOutput, SyntheticCurriculumConfig, GroundTruth
+    syn_config = SyntheticCurriculumConfig(
+        synthetic_id="kill-test",
+        ground_truth=GroundTruth(expected_grade="9", expected_subject="Biology", expected_jurisdiction="national")
+    )
+    return SyntheticCurriculumOutput(
+        config=syn_config,
         content_markdown="# Cell Division\n\n## Mitosis\nMitosis is the process...",
         metrics={},
         metadata={"provenance": {"source_authority": "National Board"}}

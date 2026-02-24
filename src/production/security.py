@@ -78,12 +78,19 @@ def verify_db_is_readonly(session: Session) -> bool:
     except Exception as e:
         # Any other exception (permission denied, etc.) means read-only is working
         error_str = str(e).lower()
-        if "permission" in error_str or "denied" in error_str or "read" in error_str:
+        if (
+            "permission" in error_str or 
+            "denied" in error_str or 
+            "read-only" in error_str or
+            "read only" in error_str
+        ):
             logger.info("DB-level read-only verification PASSED")
             return True
-        # Log unexpected errors but treat as read-only to be safe
-        logger.warning(f"Unexpected error during read-only check: {e}")
-        return True
+            
+        # If it's another kind of error (timeout, syntax, connection lost),
+        # we CANNOT guarantee read-only status. Fail closed.
+        logger.error(f"Unexpected error during read-only check: {e}")
+        raise DatabaseNotReadOnlyError(f"Verification failed with unexpected error: {e}")
 
 
 def verify_readonly_status(session: Session) -> bool:

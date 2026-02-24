@@ -5,11 +5,10 @@ Purpose: Verify strict governance overrides and provenance validation.
 """
 
 import pytest
+import asyncio
 from unittest.mock import Mock, patch
 from src.production.errors import GroundingViolationError
 from src.synthetic.schemas import SyntheticCurriculumOutput
-# Assuming there is a GovernanceError or similar, otherwise we expect generic rejection
-# We will check specific exception messages
 
 class TestGovernanceBlocks:
 
@@ -38,9 +37,13 @@ class TestGovernanceBlocks:
             mock_report.grounding_rate = 0.96
             harness.grounding.verify_artifact = Mock(return_value=mock_report)
             
-            # Should PASS (University rules applied despite user intent if logic was strictly separate, 
-            # but here the system decides mode).
-            primary_out = harness.generate_artifact("test-mit", Mock(), valid_provenance)
+            mock_config = Mock()
+            mock_config.grade = "Grade 10"
+            mock_config.jurisdiction = "National"
+            mock_config.topic_title = "Biology"
+            
+            # Should PASS (University rules applied)
+            primary_out = asyncio.run(harness.generate_artifact("test-mit", mock_config, valid_provenance))
             assert primary_out is not None
 
     def test_kt_d2_missing_provenance(self, harness):
@@ -49,33 +52,42 @@ class TestGovernanceBlocks:
         Action: Remove source_url
         Expected: GovernanceEnforcer raises error
         """
-        # We need to reach the governance enforcer check
-        # Harness calls: self.governance.enforce(primary_out, jurisdiction, provenance)
-        
-        # We'll mock the internal generation to return a valid object
-        # and see if governance raises
-        
-        from src.synthetic.schemas import SyntheticCurriculumOutput
-        out = SyntheticCurriculumOutput.model_construct(
+        from src.synthetic.schemas import SyntheticCurriculumOutput, SyntheticCurriculumConfig, GroundTruth
+        syn_config = SyntheticCurriculumConfig(
+            synthetic_id="test",
+            ground_truth=GroundTruth(expected_grade="9", expected_subject="Science", expected_jurisdiction="national")
+        )
+        out = SyntheticCurriculumOutput(
+            config=syn_config,
             content_markdown="# Content",
             metrics={},
-            metadata={"provenance": {}} # Empty provenance
+            metadata={"provenance": {}}
         )
         
-        # We mock run_generation to return this
-        harness._run_generation = Mock(return_value=out)
+        async def fake_gen(*a, **kw):
+            return out
+        harness._run_generation = fake_gen
         harness._derive_jurisdiction = Mock(return_value="National")
         
-        # Governance is strictly strict_mode=True
-        # It should fail on missing keys
-        with pytest.raises(Exception): # Pydantic or KeyError
-             harness.generate_artifact("test", Mock(), {})
+        mock_config = Mock()
+        mock_config.grade = "Grade 9"
+        mock_config.jurisdiction = "National"
+        mock_config.topic_title = "Biology"
+        
+        with pytest.raises(Exception):
+            asyncio.run(harness.generate_artifact("test", mock_config, {}))
 
     def test_kt_d4a_future_dated_provenance(self, harness):
         """
         KT-D4a: Future-dated fetch_date
         """
-        out = SyntheticCurriculumOutput.model_construct(
+        from src.synthetic.schemas import SyntheticCurriculumConfig, GroundTruth
+        syn_config = SyntheticCurriculumConfig(
+            synthetic_id="test-future",
+            ground_truth=GroundTruth(expected_grade="9", expected_subject="Science", expected_jurisdiction="national")
+        )
+        out = SyntheticCurriculumOutput(
+            config=syn_config,
             content_markdown="# Content",
             metrics={},
             metadata={
@@ -86,20 +98,23 @@ class TestGovernanceBlocks:
                 }
             }
         )
-        harness._run_generation = Mock(return_value=out)
+        async def fake_gen(*a, **kw):
+            return out
+        harness._run_generation = fake_gen
         harness._derive_jurisdiction = Mock(return_value="National")
         
-        # This requires GovernanceEnforcer to check dates. 
-        # Check if current implementation supports it, otherwise this test proves the gap.
-        # Ideally we want this to fail.
+        mock_config = Mock()
+        mock_config.grade = "Grade 9"
+        mock_config.jurisdiction = "National"
+        mock_config.topic_title = "Biology"
+        
         try:
-            harness.generate_artifact("test", Mock(), {})
+            asyncio.run(harness.generate_artifact("test", mock_config, {}))
         except Exception as e:
-            # If it fails, good.
             pass
 
     def test_kt_d4c_tampered_checksum(self, harness):
         """
         KT-D4c: Tampered checksum (simulated)
         """
-        pass # Placeholder for actual checksum implementation logic
+        pass  # Placeholder for actual checksum implementation logic

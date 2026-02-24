@@ -67,10 +67,11 @@ class OpenAIProvider(LLMProviderInterface):
 
     def call(self, prompt: str, max_tokens: int = 512, **kwargs):
         import openai
-        openai.api_key = self.api_key
+        # Use v1.x client
+        client = openai.OpenAI(api_key=self.api_key)
         for attempt in range(LLM_MAX_RETRIES):
             try:
-                resp = openai.ChatCompletion.create(
+                resp = client.chat.completions.create(
                     model=self.model,
                     messages=[{"role":"system","content":"You are a curriculum standardization assistant."},{"role":"user","content":prompt}],
                     max_tokens=max_tokens,

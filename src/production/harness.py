@@ -19,7 +19,7 @@ import os
 
 from sqlalchemy.orm import Session
 
-from src.synthetic.schemas import SyntheticCurriculumConfig, SyntheticCurriculumOutput
+from src.synthetic.schemas import SyntheticCurriculumConfig, SyntheticCurriculumOutput, GroundTruth
 from src.production.security import ReadOnlySession, verify_readonly_status, verify_db_is_readonly
 from src.production.governance import GovernanceEnforcer
 from src.production.grounding import GroundingVerifier
@@ -145,15 +145,16 @@ class ProductionHarness:
             mode=content_mode
         )
         
-        # REAL REJECTION - not warning
-        # Use VERDICT which respects mode-specific thresholds (e.g. 95% for Uni)
+        # REAL REJECTION — configurable via GROUNDING_ACTION env var
         if report.verdict == "FAIL":
-            action = os.getenv("GROUNDING_ACTION", "WARN")
+            action = os.getenv("GROUNDING_ACTION", "WARN").upper()
             if action == "BLOCK":
                 raise GroundingViolationError(report.ungrounded_sentences)
             else:
-                 # Just log specific warnings, assume user knows
-                 print(f"Grounding Warning: {len(report.ungrounded_sentences)} ungrounded sentences found.")
+                logger.warning(
+                    "Grounding WARN: %d ungrounded sentences detected (action=%s)",
+                    len(report.ungrounded_sentences), action
+                )
                 
         # E. Shadow Execution
         shadow_out = await self._run_shadow_generation(curriculum_id, config)
@@ -182,19 +183,22 @@ class ProductionHarness:
             environment=environment
         )
         
-        # H. Hallucination LOGGING ONLY (disable blocking for free tier variance)
+        # H. Hallucination Check — configurable via HALLUCINATION_ACTION env var
+        #    Defaults to WARN for backward compatibility (free-tier model variance).
+        #    Set HALLUCINATION_ACTION=BLOCK in production for strict enforcement.
         if "HALLUCINATION_RISK_HIGH" in shadow_log.alerts:
-            # Non-blocking warning for free tier / multi-model variance
-            logger.warning(
-                f"Shadow hallucination risk detected for request {request_id}. "
-                f"Rate: {shadow_log.metrics.extra_topic_rate}. "
-                "Proceeding despite risk (blocking disabled)."
-            )
-            # raise HallucinationBlockError(
-            #     shadow_log.metrics.extra_topic_rate,
-            #     shadow_log.alerts,
-            #     request_id
-            # )
+            hallucination_action = os.getenv("HALLUCINATION_ACTION", "WARN").upper()
+            if hallucination_action == "BLOCK":
+                raise HallucinationBlockError(
+                    shadow_log.metrics.extra_topic_rate,
+                    shadow_log.alerts,
+                    request_id
+                )
+            else:
+                logger.warning(
+                    "Hallucination WARN for request %s: extra_topic_rate=%.3f (action=%s)",
+                    request_id, shadow_log.metrics.extra_topic_rate, hallucination_action
+                )
         
         return primary_out
     
@@ -239,8 +243,22 @@ class ProductionHarness:
             temperature=0.3
         )
         
-        return SyntheticCurriculumOutput.model_construct(
-            curriculum_id=c_id,
+        # Create a valid config to satisfy Pydantic schema validation
+        syn_config = SyntheticCurriculumConfig(
+            synthetic_id="prod-" + c_id,
+            country="Production",
+            country_code="PR",
+            grade=getattr(config, "grade", "Unknown"),
+            subject=getattr(config, "topic_title", "Unknown"),
+            ground_truth=GroundTruth(
+                expected_jurisdiction=getattr(config, "jurisdiction", "Unknown"),
+                expected_grade=getattr(config, "grade", "Unknown"),
+                expected_subject=getattr(config, "topic_title", "Unknown")
+            )
+        )
+        
+        return SyntheticCurriculumOutput(
+            config=syn_config,
             content_markdown=content,
             metrics={"model": "gemini-2.0-flash", "generated_at": datetime.now().isoformat()},
             metadata={"provenance": self.primary_provenance.to_dict()}
@@ -265,13 +283,27 @@ class ProductionHarness:
         
         content = await client.generate_text(
             prompt=prompt,
-            model=GeminiModel.FLASH, # Using Flash for shadow to save cost/time in demo
+            model=GeminiModel.PRO, # Use Pro model for shadow to detect variance/hallucinations
             temperature=0.3
         )
         
-        return SyntheticCurriculumOutput.model_construct(
-            curriculum_id=c_id,
+        # Create a valid config to satisfy Pydantic schema validation
+        syn_config = SyntheticCurriculumConfig(
+            synthetic_id="shadow-" + c_id,
+            country="Production Shadow",
+            country_code="SH",
+            grade=getattr(config, "grade", "Unknown"),
+            subject=getattr(config, "topic_title", "Unknown"),
+            ground_truth=GroundTruth(
+                expected_jurisdiction=getattr(config, "jurisdiction", "Unknown"),
+                expected_grade=getattr(config, "grade", "Unknown"),
+                expected_subject=getattr(config, "topic_title", "Unknown")
+            )
+        )
+        
+        return SyntheticCurriculumOutput(
+            config=syn_config,
             content_markdown=content,
-            metrics={"model": "gemini-2.0-flash-shadow"},
+            metrics={"model": "gemini-2.0-pro-shadow", "generated_at": datetime.now().isoformat()},
             metadata={"provenance": self.shadow_provenance.to_dict()}
         )

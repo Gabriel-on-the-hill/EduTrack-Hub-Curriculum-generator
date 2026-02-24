@@ -5,6 +5,7 @@ Critical Purpose: Ensure NO ungrounded content is ever returned.
 """
 
 import pytest
+import asyncio
 from unittest.mock import Mock, patch
 from src.production.errors import GroundingViolationError, HallucinationBlockError
 from src.production.harness import ProductionHarness
@@ -25,15 +26,21 @@ class TestHallucinationDefense:
         harness.grounding.verify_artifact = Mock(return_value=mock_report)
         
         # Need to ensure fetch_curriculum_mode and fetch_competencies don't block before grounding
+        mock_config = Mock()
+        mock_config.grade = "Grade 9"
+        mock_config.jurisdiction = "National"
+        mock_config.topic_title = "Biology"
+        
         with patch('src.production.harness.fetch_curriculum_mode', return_value="k12"), \
-             patch('src.production.harness.fetch_competencies', return_value=[{"id": "1", "text": "Basic Bio"}]):
+             patch('src.production.harness.fetch_competencies', return_value=[{"id": "1", "text": "Basic Bio"}]), \
+             patch.dict('os.environ', {'GROUNDING_ACTION': 'BLOCK'}):
             
             with pytest.raises(GroundingViolationError) as exc:
-                harness.generate_artifact(
+                asyncio.run(harness.generate_artifact(
                     curriculum_id="test", 
-                    config=Mock(), 
+                    config=mock_config, 
                     provenance=valid_provenance
-                )
+                ))
             
             assert "Quantum epigenetic synthesis" in exc.value.ungrounded_sentences
 
@@ -57,11 +64,17 @@ class TestHallucinationDefense:
         mock_report.ungrounded_sentences = ["Advanced stuff"]
         harness.grounding.verify_artifact = Mock(return_value=mock_report)
         
+        mock_config = Mock()
+        mock_config.grade = "Grade 9"
+        mock_config.jurisdiction = "National"
+        mock_config.topic_title = "Biology"
+        
         with patch('src.production.harness.fetch_curriculum_mode', return_value="k12"), \
-             patch('src.production.harness.fetch_competencies', return_value=[{"id": "1", "text": "Bio"}]):
+             patch('src.production.harness.fetch_competencies', return_value=[{"id": "1", "text": "Bio"}]), \
+             patch.dict('os.environ', {'GROUNDING_ACTION': 'BLOCK'}):
             
             with pytest.raises(GroundingViolationError):
-                harness.generate_artifact("test-k12", Mock(), valid_provenance)
+                asyncio.run(harness.generate_artifact("test-k12", mock_config, valid_provenance))
 
     def test_kt_b2_semantic_stretch_uni(self, harness, valid_provenance):
         """
@@ -80,8 +93,13 @@ class TestHallucinationDefense:
              patch('src.production.harness.extract_topics', return_value=[]), \
              patch.object(harness.shadow_logger, 'log_shadow_run', return_value=Mock(alerts=[], metrics=Mock(extra_topic_rate=0.0))):
              
+             mock_config = Mock()
+             mock_config.grade = "Grade 9"
+             mock_config.jurisdiction = "National"
+             mock_config.topic_title = "Biology"
+             
              # Should NOT raise
-             harness.generate_artifact("test-uni", Mock(), valid_provenance)
+             asyncio.run(harness.generate_artifact("test-uni", mock_config, valid_provenance))
 
     def test_kt_b3_shadow_disagreement(self, harness, valid_provenance):
         """
@@ -99,10 +117,16 @@ class TestHallucinationDefense:
              patch('src.production.harness.extract_topics', side_effect=[
                  ["a", "b", "c"],       # Primary
                  ["a", "b", "c", "d"]   # Shadow
-             ]):
+             ]), \
+             patch.dict('os.environ', {'HALLUCINATION_ACTION': 'BLOCK'}):
+            
+            mock_config = Mock()
+            mock_config.grade = "Grade 9"
+            mock_config.jurisdiction = "National"
+            mock_config.topic_title = "Biology"
             
             with pytest.raises(HallucinationBlockError) as exc:
-                harness.generate_artifact("test-shadow-fail", Mock(), valid_provenance)
+                asyncio.run(harness.generate_artifact("test-shadow-fail", mock_config, valid_provenance))
                 
             assert exc.value.extra_topic_rate == 0.25
             assert "HALLUCINATION_RISK_HIGH" in exc.value.alerts

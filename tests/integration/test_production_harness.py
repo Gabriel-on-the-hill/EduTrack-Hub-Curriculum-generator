@@ -56,9 +56,16 @@ class TestHarnessRejectsUngroundedEndToEnd(unittest.TestCase):
             verify_db_level=False
         )
         
+        # Create a valid config for the mock output
+        from src.synthetic.schemas import SyntheticCurriculumConfig, GroundTruth
+        syn_config = SyntheticCurriculumConfig(
+            synthetic_id="test",
+            ground_truth=GroundTruth(expected_grade="9", expected_subject="Science", expected_jurisdiction="national")
+        )
+        
         # Mock _run_generation to return a fake output (avoids calling Gemini)
-        mock_output = SyntheticCurriculumOutput.model_construct(
-            curriculum_id="test-id",
+        mock_output = SyntheticCurriculumOutput(
+            config=syn_config,
             content_markdown="# Test content with ungrounded material",
             metrics={},
             metadata={}
@@ -93,14 +100,20 @@ class TestHarnessRejectsUngroundedEndToEnd(unittest.TestCase):
             "extraction_confidence": 0.95
         }
         
-        with self.assertRaises(GroundingViolationError) as ctx:
-            asyncio.run(self.harness.generate_artifact(
-                curriculum_id="test-id",
-                config=Mock(),
-                provenance=provenance
-            ))
+        mock_config = Mock()
+        mock_config.grade = "Grade 9"
+        mock_config.jurisdiction = "National"
+        mock_config.topic_title = "Biology"
         
-        self.assertIn("ungrounded content", str(ctx.exception))
+        with patch.dict('os.environ', {'GROUNDING_ACTION': 'BLOCK'}):
+            with self.assertRaises(GroundingViolationError) as ctx:
+                asyncio.run(self.harness.generate_artifact(
+                    curriculum_id="test-id",
+                    config=mock_config,
+                    provenance=provenance
+                ))
+            
+            self.assertIn("ungrounded content", str(ctx.exception))
 
 
 class TestShadowBlockerTriggersAndPersistsAlert(unittest.TestCase):
@@ -152,14 +165,20 @@ class TestShadowBlockerTriggersAndPersistsAlert(unittest.TestCase):
             "extraction_confidence": 0.95
         }
         
-        with self.assertRaises(HallucinationBlockError) as ctx:
-            asyncio.run(self.harness.generate_artifact(
-                curriculum_id="test-id",
-                config=Mock(),
-                provenance=provenance
-            ))
+        mock_config = Mock()
+        mock_config.grade = "Grade 9"
+        mock_config.jurisdiction = "National"
+        mock_config.topic_title = "Biology"
         
-        self.assertIn("HALLUCINATION_RISK_HIGH", ctx.exception.alerts)
+        with patch.dict('os.environ', {'HALLUCINATION_ACTION': 'BLOCK'}):
+            with self.assertRaises(HallucinationBlockError) as ctx:
+                asyncio.run(self.harness.generate_artifact(
+                    curriculum_id="test-id",
+                    config=mock_config,
+                    provenance=provenance
+                ))
+            
+            self.assertIn("HALLUCINATION_RISK_HIGH", ctx.exception.alerts)
 
 
 class TestContentDeltaCalculationWithEmbedding(unittest.TestCase):
@@ -222,14 +241,20 @@ class TestShadowLogPersistence(unittest.TestCase):
         
     def test_log_persisted_to_storage(self):
         """Shadow log must be written to storage path."""
-        primary = SyntheticCurriculumOutput.model_construct(
-            curriculum_id="test",
+        from src.synthetic.schemas import SyntheticCurriculumConfig, GroundTruth
+        syn_config = SyntheticCurriculumConfig(
+            synthetic_id="test",
+            ground_truth=GroundTruth(expected_grade="9", expected_subject="Science", expected_jurisdiction="national")
+        )
+        
+        primary = SyntheticCurriculumOutput(
+            config=syn_config,
             content_markdown="# Test",
             metadata={},
             metrics={}
         )
-        shadow = SyntheticCurriculumOutput.model_construct(
-            curriculum_id="test",
+        shadow = SyntheticCurriculumOutput(
+            config=syn_config,
             content_markdown="# Test",
             metadata={},
             metrics={}

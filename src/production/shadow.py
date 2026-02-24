@@ -23,31 +23,16 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable
 from uuid import UUID
 
 import numpy as np
 from pydantic import BaseModel, Field
 
 from src.synthetic.schemas import SyntheticCurriculumOutput
+from src.production.embeddings import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# PROTOCOLS
-# =============================================================================
-
-class EmbeddingProvider(Protocol):
-    """Protocol for embedding providers."""
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed texts into vectors."""
-        ...
-    
-    @property
-    def model_name(self) -> str:
-        """Return model identifier."""
-        ...
 
 
 # =============================================================================

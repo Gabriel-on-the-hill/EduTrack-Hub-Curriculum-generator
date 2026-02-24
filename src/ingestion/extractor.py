@@ -8,7 +8,12 @@ def heuristic_extract(text: str) -> List[ExtractedCompetency]:
     competencies = []
 
     for idx, line in enumerate(lines):
-        if re.match(r"^\d+\.", line.strip()) or line.strip().startswith("-"):
+        # Support for numbers, bullets, letters (a), (i), and Section headers
+        if (re.match(r"^\d+\.", line.strip()) or 
+            line.strip().startswith("-") or
+            re.match(r"^[a-zA-Z]\)", line.strip()) or
+            re.match(r"^[ivxlcdmIVXLCDM]+\)", line.strip()) or
+            re.match(r"^(Section|Unit|Chapter|Module)\s+\w+", line.strip(), re.I)):
             competencies.append(
                 ExtractedCompetency(
                     title=line.strip(),
