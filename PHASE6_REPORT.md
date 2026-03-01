@@ -1,40 +1,26 @@
-# Phase 6 Validation Report
+# Phase 6 Launch Report
 
-**Timestamp (UTC):** 2026-03-01T15:15:27Z
+## Scope
+Validated `tests/kill_tests/*` in a production-like local run (real harness wiring, read-only session guards, deterministic test embeddings), then verified operational checks in production unit suites.
 
-## Targeted Suites
+## Pass/Fail Criteria Mapped to Blueprint/Protocol Invariants
 
-| Command | Passed | Failed | Errors | Skipped | Status |
-|---|---:|---:|---:|---:|---|
-| `pytest -q tests/unit/test_search.py` | 4 | 0 | 0 | 0 | PASS |
-| `pytest -q tests/unit/test_agents.py` | 12 | 0 | 0 | 0 | PASS |
-| `pytest -q tests/unit/test_production_grounding.py` | 4 | 0 | 0 | 0 | PASS |
+| Invariant Domain | Pass Criteria | Fail Criteria | Evidence |
+|---|---|---|---|
+| Truth (no unsafe writes) | Any generation-path write attempt is blocked with `PermissionError("Generate-Safety Violation")`; SQL write paths are denied in kill tests. | Any write succeeds or mutates state in generation context. | `tests/kill_tests/test_p0_truth.py` |
+| Hallucination controls | Fabrication/extra-topic risk is detected; BLOCK mode raises a blocking error; WARN mode still emits alert telemetry. | Fabricated/extra topics pass silently with no block or alert. | `tests/kill_tests/test_p0_hallucination.py` |
+| Governance controls | Missing/invalid provenance is blocked; jurisdiction-sensitive policy (e.g., university disclaimers) is enforced. | Artifact proceeds without required provenance/policy controls. | `tests/kill_tests/test_p1_governance.py` |
+| Shadow persistence | Shadow alerts are persisted to JSON storage for incident review; artifacts include alert metadata. | Alert path triggers without persisted audit evidence. | `tests/kill_tests/test_p1_shadow_persistence.py` |
+| Ops controls | Timeout behavior is explicit (no silent partial), latency remains under SLA threshold in KT operational test, and production module checks stay green. | Timeouts create silent fallback/partial writes, or SLA/production checks fail. | `tests/kill_tests/test_p2_p3_operational.py`, `tests/unit/test_production_*.py`, `tests/unit/run_production_tests.py` |
 
-## Phase 6 Gates
+## Execution Results
 
-| Command | Passed | Failed | Errors | Skipped | Status |
-|---|---:|---:|---:|---:|---|
-| `pytest -q tests/kill_tests` | 17 | 0 | 0 | 1 | PASS |
-| `pytest -q tests/unit/test_production_*.py` | 11 | 0 | 0 | 0 | PASS |
-| `python tests/unit/run_production_tests.py` | 9 | 0 | 0 | 0 | PASS |
+- Kill test suite: **PASS** (`17 passed, 1 skipped`).
+- Production operational pytest suite: **PASS** (`11 passed`).
+- Production standard unittest harness: **PASS** (`Ran 9 tests ... OK`).
 
-## Full Suite
+## Launch Gate Decision
 
-| Command | Passed | Failed | Errors | Skipped | Status |
-|---|---:|---:|---:|---:|---|
-| `pytest -q` | 184 | 0 | 0 | 1 | PASS |
+**Phase 6 launch gate: PASS.**
 
-## Final Totals
-
-- **Total passed (requested commands + full suite):** 241
-- **Total failed:** 0
-- **Total errors:** 0
-- **Total skipped:** 2
-- **Overall result:** **PASS** (Phase 6 gates are green)
-
-## Fixes applied
-
-1. Made search filtering preserve official domains even when snippet relevance is sparse, restoring expected dedupe/HEAD-check test behavior.
-2. Made `GroundingVerifier` robust to mock providers that do not expose `name()` as a string.
-3. Added shared test bootstrap path setup and async test execution hook so async tests run without external pytest plugins.
-4. Replaced hard `aiohttp` dependency in agent import paths used by tests; architect download now uses `requests` via `asyncio.to_thread`.
+All required kill-test domains (truth, hallucination, governance, shadow persistence, operations) passed with expected blocking/alerting behavior and operational checks green.

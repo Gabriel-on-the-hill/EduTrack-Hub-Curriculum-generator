@@ -58,24 +58,18 @@ class GroundingVerifier:
             similarity_threshold: Min cosine similarity to consider grounded
         """
         self.embedding_provider = embedding_provider or get_embedding_provider()
-
-        provider_name_attr = getattr(self.embedding_provider, "name", "")
-        provider_name_value = provider_name_attr() if callable(provider_name_attr) else provider_name_attr
-        self.provider_name = str(provider_name_value).lower()
-
+        provider_name = self._provider_name()
+        
         # Adjust threshold for Jaccard/BoW fallback
         # 0.8 is too high for bag-of-words (requires near-duplicate text)
-        if "jaccard-only" in self.provider_name:
+        if "jaccard-only" in provider_name:
             self.similarity_threshold = 0.3
             logging.info(
                 f"GroundingVerifier: Using Jaccard provider, threshold={self.similarity_threshold}"
             )
         else:
             self.similarity_threshold = similarity_threshold
-            logging.info(
-                f"GroundingVerifier: Using {self.provider_name or 'unknown-provider'}, "
-                f"threshold={self.similarity_threshold}"
-            )
+            logging.info(f"GroundingVerifier: Using {provider_name}, threshold={self.similarity_threshold}")
     
     def verify_artifact(
         self,
@@ -143,7 +137,7 @@ class GroundingVerifier:
         ungrounded = [r.sentence for r in results if not r.is_grounded]
         
         # Verdict logic: Jaccard provider is warning-only (too imprecise for strict grounding)
-        is_jaccard = "jaccard-only" in self.provider_name
+        is_jaccard = "jaccard-only" in self._provider_name()
         
         if is_jaccard:
             logging.info(f"Jaccard provider: {len(ungrounded)} ungrounded sentences logged as warnings, verdict=PASS")
@@ -161,6 +155,16 @@ class GroundingVerifier:
             ungrounded_sentences=ungrounded,
             verdict=verdict
         )
+
+    def _provider_name(self) -> str:
+        """Safely resolve embedding provider name for logging/feature checks."""
+        raw_name = getattr(self.embedding_provider, "name", None)
+        if callable(raw_name):
+            try:
+                raw_name = raw_name()
+            except Exception:
+                raw_name = None
+        return str(raw_name or self.embedding_provider.__class__.__name__).lower()
     
     def _split_sentences(self, text: str) -> list[str]:
         """Improved sentence splitter using regex limits for better boundary detection without NLTK."""
@@ -197,4 +201,3 @@ class GroundingVerifier:
                 best_comp = competencies[idx]
                 
         return {'id': best_comp['id'] if best_comp else None, 'score': best_score}
-
