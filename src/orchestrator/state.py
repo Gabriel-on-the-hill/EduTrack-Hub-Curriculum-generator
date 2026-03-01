@@ -169,6 +169,9 @@ class GraphState(BaseModel):
     has_error: bool = False
     error_node: str | None = None
     error_message: str | None = None
+    error_code: str | None = None
+    error_retryable: bool = True
+    error_details: dict[str, Any] = Field(default_factory=dict)
     requires_human_alert: bool = False
     
     # =========================================================================
@@ -188,6 +191,11 @@ class GraphState(BaseModel):
         self.current_node = node_name
         # Clear error state when starting fresh
         self.has_error = False
+        self.error_node = None
+        self.error_message = None
+        self.error_code = None
+        self.error_retryable = True
+        self.error_details = {}
         
         execution = NodeExecution(
             node_name=node_name,
@@ -217,6 +225,10 @@ class GraphState(BaseModel):
         self.has_error = True
         self.error_node = node_name
         self.error_message = error
+        if not self.error_code:
+            self.error_code = "UNHANDLED_NODE_ERROR"
+        if not self.error_details:
+            self.error_details = {"node": node_name}
     
     def can_retry_node(self, node_name: str) -> bool:
         """
