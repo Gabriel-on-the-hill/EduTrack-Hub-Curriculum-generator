@@ -64,7 +64,9 @@ class GroundingVerifier:
         # 0.8 is too high for bag-of-words (requires near-duplicate text)
         if "jaccard-only" in provider_name:
             self.similarity_threshold = 0.3
-            logging.info(f"GroundingVerifier: Using Jaccard provider, threshold={self.similarity_threshold}")
+            logging.info(
+                f"GroundingVerifier: Using Jaccard provider, threshold={self.similarity_threshold}"
+            )
         else:
             self.similarity_threshold = similarity_threshold
             logging.info(f"GroundingVerifier: Using {provider_name}, threshold={self.similarity_threshold}")

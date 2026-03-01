@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
-import aiohttp
+import requests
 import fitz  # PyMuPDF
 
 from pydantic import BaseModel
@@ -203,13 +203,11 @@ class ArchitectAgent:
         if "example.org" in url or not url.startswith("http"):
             return self._create_mock_pdf(cache_path)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status != 200:
-                    raise ValueError(f"Failed to download PDF: {response.status}")
-                
-                content = await response.read()
-                cache_path.write_bytes(content)
+        response = await asyncio.to_thread(requests.get, url, timeout=20)
+        if response.status_code != 200:
+            raise ValueError(f"Failed to download PDF: {response.status_code}")
+
+        cache_path.write_bytes(response.content)
         
         checksum = self._compute_checksum(cache_path)
         return cache_path, checksum
