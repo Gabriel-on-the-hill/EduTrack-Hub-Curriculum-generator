@@ -58,15 +58,24 @@ class GroundingVerifier:
             similarity_threshold: Min cosine similarity to consider grounded
         """
         self.embedding_provider = embedding_provider or get_embedding_provider()
-        
+
+        provider_name_attr = getattr(self.embedding_provider, "name", "")
+        provider_name_value = provider_name_attr() if callable(provider_name_attr) else provider_name_attr
+        self.provider_name = str(provider_name_value).lower()
+
         # Adjust threshold for Jaccard/BoW fallback
         # 0.8 is too high for bag-of-words (requires near-duplicate text)
-        if "jaccard-only" in self.embedding_provider.name():
+        if "jaccard-only" in self.provider_name:
             self.similarity_threshold = 0.3
-            logging.info(f"GroundingVerifier: Using Jaccard provider, threshold={self.similarity_threshold}")
+            logging.info(
+                f"GroundingVerifier: Using Jaccard provider, threshold={self.similarity_threshold}"
+            )
         else:
             self.similarity_threshold = similarity_threshold
-            logging.info(f"GroundingVerifier: Using {self.embedding_provider.name()}, threshold={self.similarity_threshold}")
+            logging.info(
+                f"GroundingVerifier: Using {self.provider_name or 'unknown-provider'}, "
+                f"threshold={self.similarity_threshold}"
+            )
     
     def verify_artifact(
         self,
@@ -134,7 +143,7 @@ class GroundingVerifier:
         ungrounded = [r.sentence for r in results if not r.is_grounded]
         
         # Verdict logic: Jaccard provider is warning-only (too imprecise for strict grounding)
-        is_jaccard = "jaccard-only" in self.embedding_provider.name()
+        is_jaccard = "jaccard-only" in self.provider_name
         
         if is_jaccard:
             logging.info(f"Jaccard provider: {len(ungrounded)} ungrounded sentences logged as warnings, verdict=PASS")

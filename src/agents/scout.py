@@ -18,7 +18,6 @@ import re
 from typing import Any
 from uuid import UUID, uuid4
 
-import aiohttp
 
 from src.schemas.agents import CandidateUrl, ScoutOutput
 from src.schemas.base import AgentStatus, AuthorityHint

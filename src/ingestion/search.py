@@ -146,7 +146,9 @@ def search_web(query: str, max_results: int = 10, region: str = "us-en", use_cac
                     "snippet": r.get("body") or r.get("snippet") or "",
                     "url": url
                 }
-                if not _is_relevant(temp_res, query_terms):
+                # Keep official domains even when text snippets are sparse/noisy.
+                # This preserves authoritative sources while still filtering most noise.
+                if not _is_relevant(temp_res, query_terms) and not _is_official_domain(url):
                     continue
 
                 # lightweight validation (HEAD)
