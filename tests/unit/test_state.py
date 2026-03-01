@@ -88,6 +88,31 @@ class TestGraphState:
         state.record_node_failure("RetryNode", "Error 2")
         assert state.can_retry_node("RetryNode") is False  # 2 attempts, cannot retry
 
+
+
+    def test_record_node_start_clears_error_metadata(self) -> None:
+        """Starting a node should clear stale deterministic error metadata."""
+        state = GraphState(request_id=uuid4(), raw_prompt="test")
+        state.error_code = "OLD"
+        state.error_details = {"x": 1}
+        state.error_message = "old"
+        state.has_error = True
+
+        state.record_node_start("FreshNode")
+
+        assert state.has_error is False
+        assert state.error_code is None
+        assert state.error_details == {}
+        assert state.error_message is None
+
+    def test_record_failure_sets_default_error_code(self) -> None:
+        """Failure should include retry-safe metadata defaults."""
+        state = GraphState(request_id=uuid4(), raw_prompt="test")
+        state.record_node_start("BadNode")
+        state.record_node_failure("BadNode", "boom")
+
+        assert state.error_code == "UNHANDLED_NODE_ERROR"
+        assert state.error_details == {"node": "BadNode"}
     def test_fallback_tier_escalation(self) -> None:
         """Fallback tiers should escalate correctly."""
         state = GraphState(
