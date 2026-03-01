@@ -185,3 +185,79 @@ class TestGraphExecution:
         assert "NormalizeRequest" in node_names
         assert "ResolveJurisdiction" in node_names
         assert "VaultLookup" in node_names
+
+
+class TestNodeFailureBranches:
+    """Unit tests for deterministic node failure metadata."""
+
+    def test_enqueue_cold_start_requires_flag(self) -> None:
+        from src.orchestrator.nodes import enqueue_cold_start_node
+
+        state = GraphState(request_id=uuid4(), raw_prompt="test", needs_cold_start=False)
+        updated = enqueue_cold_start_node(state)
+
+        assert updated.has_error is True
+        assert updated.error_code == "COLD_START_NOT_REQUIRED"
+        assert updated.error_retryable is False
+
+    def test_gatekeeper_conflict_triggers_alert_metadata(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.orchestrator.nodes import gatekeeper_agent_node
+        from src.schemas.base import AgentStatus, LicenseType
+        from src.schemas.agents import GatekeeperOutput, ApprovedSource
+        from datetime import date
+
+        async def _fake_gatekeeper(*args, **kwargs):
+            return GatekeeperOutput(
+                job_id=uuid4(),
+                approved_sources=[
+                    ApprovedSource(
+                        url="https://a.gov/x.pdf",
+                        authority="A",
+                        license=LicenseType.GOVERNMENT,
+                        published_date=date(2020, 1, 1),
+                        confidence=0.95,
+                    )
+                ],
+                rejected_sources=[],
+                status=AgentStatus.CONFLICTED,
+            )
+
+        monkeypatch.setattr("src.orchestrator.nodes._call_gatekeeper", lambda *args, **kwargs: __import__("asyncio").run(_fake_gatekeeper()))
+
+        state = GraphState(
+            request_id=uuid4(),
+            raw_prompt="test",
+            candidate_urls=["https://a.gov/x.pdf"],
+            normalized_country="Nigeria",
+            normalized_country_code="NG",
+        )
+        updated = gatekeeper_agent_node(state)
+
+        assert updated.has_error is True
+        assert updated.requires_human_alert is True
+        assert updated.error_code == "SOURCE_CONFLICT"
+
+    def test_generate_rejects_missing_citations(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.orchestrator.nodes import generate_node
+
+        class _Provider:
+            def call(self, prompt: str, max_tokens: int = 512, **kwargs):
+                class _Resp:
+                    ok = True
+                    text = "# Lesson\nNo references here"
+                return _Resp()
+
+        monkeypatch.setattr("src.orchestrator.nodes.get_llm_provider", lambda *_args, **_kwargs: _Provider())
+
+        state = GraphState(
+            request_id=uuid4(),
+            raw_prompt="Grade 9 Biology in Nigeria",
+            curriculum_id=uuid4(),
+            normalized_grade="Grade 9",
+            normalized_subject="Biology",
+            normalized_country="Nigeria",
+        )
+
+        updated = generate_node(state)
+        assert updated.has_error is True
+        assert updated.error_node == "Generate"
