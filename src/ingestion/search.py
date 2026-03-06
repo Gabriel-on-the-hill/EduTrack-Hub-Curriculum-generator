@@ -4,7 +4,7 @@ from typing import List, Dict, Optional
 from urllib.parse import urlparse, urljoin
 import requests
 from cachetools import TTLCache
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 logger = logging.getLogger(__name__)
 CACHE = TTLCache(maxsize=2000, ttl=24*3600)  # 24h cache for queries

@@ -21,7 +21,7 @@ from uuid import UUID, uuid4
 from src.schemas.agents import CandidateUrl, ScoutOutput
 from src.schemas.base import AgentStatus, AuthorityHint
 from src.utils.gemini_client import GeminiClient, get_gemini_client
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +205,7 @@ class ScoutAgent:
         country_code: str,
     ) -> list[CandidateUrl]:
         """
-        Execute a search query using duckduckgo_search.
+        Execute a search query using ddgs.
         """
         results: list[CandidateUrl] = []
         try:

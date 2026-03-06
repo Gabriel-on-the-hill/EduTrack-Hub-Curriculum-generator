@@ -67,10 +67,10 @@ class TestScoutAgent:
         from src.agents.scout import run_scout
         from unittest.mock import patch
         
-        # Mock duckduckgo_search text method
+        # Mock ddgs text method
         mock_results = [{"href": "https://education.gov.ng/biology-syllabus-2026.pdf"}]
         
-        with patch('duckduckgo_search.DDGS.text', return_value=mock_results):
+        with patch('ddgs.DDGS.text', return_value=mock_results):
             result = await run_scout(
                 country="Nigeria",
                 country_code="NG",

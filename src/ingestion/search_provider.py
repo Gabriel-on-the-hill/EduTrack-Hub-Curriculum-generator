@@ -1,11 +1,11 @@
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from typing import List, Dict
 from urllib.parse import urlparse
 import logging
 
 logger = logging.getLogger(__name__)
 
-def duckduckgo_search(query: str, max_results: int = 10) -> List[Dict]:
+def ddgs_search(query: str, max_results: int = 10) -> List[Dict]:
     results = []
     try:
         with DDGS() as ddgs:
