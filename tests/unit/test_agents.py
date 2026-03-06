@@ -65,14 +65,19 @@ class TestScoutAgent:
     async def test_search_returns_results(self) -> None:
         """Search should return candidate URLs."""
         from src.agents.scout import run_scout
+        from unittest.mock import patch
         
-        result = await run_scout(
-            country="Nigeria",
-            country_code="NG",
-            grade="Grade 9",
-            subject="Biology",
-        )
+        # Mock duckduckgo_search text method
+        mock_results = [{"href": "https://education.gov.ng/biology-syllabus-2026.pdf"}]
         
+        with patch('duckduckgo_search.DDGS.text', return_value=mock_results):
+            result = await run_scout(
+                country="Nigeria",
+                country_code="NG",
+                grade="Grade 9",
+                subject="Biology",
+            )
+            
         assert result.status == AgentStatus.SUCCESS
         assert len(result.candidate_urls) > 0
         assert len(result.queries) <= 5
@@ -218,6 +223,7 @@ class TestEmbedderAgent:
         """Should succeed with valid competencies."""
         from src.agents.embedder import run_embedder
         from src.schemas.agents import CompetencyItem
+        from unittest.mock import patch, MagicMock
         
         competencies = [
             CompetencyItem(
@@ -230,7 +236,12 @@ class TestEmbedderAgent:
             )
         ]
         
-        result = await run_embedder(uuid4(), competencies)
+        # Mock litellm.embedding to return a fake response
+        mock_response = MagicMock()
+        mock_response.data = [{"embedding": [0.1, 0.2, 0.3]}]
         
+        with patch('litellm.embedding', return_value=mock_response):
+            result = await run_embedder(uuid4(), competencies)
+            
         assert result.status == AgentStatus.SUCCESS
         assert result.embedded_chunks > 0

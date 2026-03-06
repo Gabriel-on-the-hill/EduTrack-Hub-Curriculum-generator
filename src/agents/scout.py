@@ -18,10 +18,10 @@ import re
 from typing import Any
 from uuid import UUID, uuid4
 
-
 from src.schemas.agents import CandidateUrl, ScoutOutput
 from src.schemas.base import AgentStatus, AuthorityHint
-from src.utils.gemini_client import GeminiClient, GeminiModel, get_gemini_client
+from src.utils.gemini_client import GeminiClient, get_gemini_client
+from duckduckgo_search import DDGS
 
 logger = logging.getLogger(__name__)
 
@@ -205,16 +205,31 @@ class ScoutAgent:
         country_code: str,
     ) -> list[CandidateUrl]:
         """
-        Execute a search query.
-        
-        Note: In production, this would use a search API like SerpAPI.
-        For now, we return mock results based on known patterns.
+        Execute a search query using duckduckgo_search.
         """
-        # Mock implementation - in production, use actual search API
-        # This simulates finding official curriculum sources
-        
-        mock_results = self._get_mock_results(query, country_code)
-        return mock_results
+        results: list[CandidateUrl] = []
+        try:
+            with DDGS() as ddgs:
+                ddg_results = ddgs.text(query, max_results=5)
+                
+            for i, res in enumerate(ddg_results, start=1):
+                url = res.get("href", "")
+                if not url:
+                    continue
+                    
+                domain = self._extract_domain(url)
+                authority_hint = self._detect_authority(url, country_code)
+                
+                results.append(CandidateUrl(
+                    url=url,
+                    domain=domain,
+                    rank=i,
+                    authority_hint=authority_hint,
+                ))
+        except Exception as e:
+            logger.error(f"DDGS Search failed for query '{query}': {e}")
+            
+        return results
     
     def _get_mock_results(
         self,

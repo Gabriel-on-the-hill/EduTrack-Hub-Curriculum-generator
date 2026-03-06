@@ -20,7 +20,8 @@ from pydantic import BaseModel
 
 from src.schemas.agents import CompetencyItem, EmbedderOutput
 from src.schemas.base import AgentStatus
-from src.utils.gemini_client import GeminiClient, get_gemini_client
+import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +46,9 @@ class EmbedderAgent:
     Creates embeddings for curriculum competencies.
     """
     
-    def __init__(self, gemini_client: GeminiClient | None = None) -> None:
-        """Initialize with optional Gemini client."""
-        self._client = gemini_client or get_gemini_client()
+    def __init__(self) -> None:
+        """Initialize."""
+        pass
     
     async def embed(
         self,
@@ -144,21 +145,24 @@ class EmbedderAgent:
         In production, would use Gemini Embedding API.
         For now, returns mock success count.
         """
-        # TODO: Implement actual embedding generation
-        # Example with Gemini:
-        # import google.generativeai as genai
-        # result = genai.embed_content(
-        #     model="models/text-embedding-004",
-        #     content=chunk.text
-        # )
-        # chunk.embedding = result["embedding"]
+        # Handle embedding generation using litellm
+        import litellm
         
-        # Mock: Simulate successful embedding
-        logger.info(f"Generated embeddings for {len(chunks)} chunks")
+        embedded_count = 0
+        try:
+            for chunk in chunks:
+                response = litellm.embedding(
+                    model=f"gemini/{EMBEDDING_MODEL}", 
+                    input=[chunk.text]
+                )
+                chunk.embedding = response.data[0]["embedding"]
+                embedded_count += 1
+                
+            logger.info(f"Generated embeddings for {embedded_count} chunks")
+        except Exception as e:
+            logger.error(f"Failed to generate embeddings: {e}")
         
-        # In production, store embeddings in vector DB here
-        
-        return len(chunks)
+        return embedded_count
 
 
 async def run_embedder(

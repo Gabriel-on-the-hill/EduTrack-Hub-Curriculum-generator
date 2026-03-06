@@ -147,7 +147,7 @@ def normalize_request_node(state: GraphState) -> GraphState:
     country = next((c.title() for c in COUNTRY_CODE_MAP if c in lowered), "Nigeria")
     country_code = COUNTRY_CODE_MAP[country.lower()]
 
-    llm = get_llm_provider({"provider": "dummy"})
+    llm = get_llm_provider()
     llm_resp = llm.call(f"- {prompt}", max_tokens=128)
     confidence = 0.9 if llm_resp.ok else 0.7
 
@@ -312,29 +312,12 @@ def scout_agent_node(state: GraphState) -> GraphState:
         },
     )
 
-    try:
-        output = _call_scout(
-            country=state.normalized_country,
-            country_code=state.normalized_country_code,
-            grade=state.normalized_grade,
-            subject=state.normalized_subject,
-        )
-    except Exception as import_err:  # noqa: BLE001
-        logger.warning("Scout dependency unavailable, using deterministic fallback: %s", import_err)
-
-        class _ScoutOutput:
-            status = AgentStatus.SUCCESS
-            queries = [state.raw_prompt]
-            candidate_urls = [
-                CandidateUrl(
-                    url="https://education.gov.ng/curriculum/default.pdf",
-                    domain="education.gov.ng",
-                    rank=1,
-                    authority_hint=AuthorityHint.OFFICIAL,
-                )
-            ]
-
-        output = _ScoutOutput()
+    output = _call_scout(
+        country=state.normalized_country,
+        country_code=state.normalized_country_code,
+        grade=state.normalized_grade,
+        subject=state.normalized_subject,
+    )
 
     if output.status == AgentStatus.FAILED or not output.candidate_urls:
         _set_node_error(
@@ -393,17 +376,7 @@ def architect_agent_node(state: GraphState) -> GraphState:
     """Input: approved_source_url. Output: competency_count and extraction_confidence."""
     _require_fields(state, "ArchitectAgent", {"approved_source_url": state.approved_source_url})
 
-    try:
-        output = _call_architect(source_url=state.approved_source_url)
-    except Exception as import_err:  # noqa: BLE001
-        logger.warning("Architect dependency unavailable, using deterministic fallback: %s", import_err)
-
-        class _ArchitectOutput:
-            status = AgentStatus.SUCCESS
-            competencies = [object()] * 5
-            average_confidence = 0.82
-
-        output = _ArchitectOutput()
+    output = _call_architect(source_url=state.approved_source_url)
     state.competency_count = len(output.competencies)
     state.extraction_confidence = output.average_confidence
 
@@ -438,17 +411,8 @@ def embedder_node(state: GraphState) -> GraphState:
     _require_fields(state, "Embedder", {"competency_count": state.competency_count})
     curriculum_id = state.curriculum_id or uuid4()
 
-    try:
-        mock_comps = _call_architect(source_url=state.approved_source_url or "https://example.org/mock.pdf").competencies
-        output = _call_embedder(curriculum_id=curriculum_id, competencies=mock_comps)
-    except Exception as import_err:  # noqa: BLE001
-        logger.warning("Embedder dependency unavailable, using deterministic fallback: %s", import_err)
-
-        class _EmbedOut:
-            status = AgentStatus.SUCCESS
-            embedded_chunks = max(state.competency_count, 1)
-
-        output = _EmbedOut()
+    architect_output = _call_architect(source_url=state.approved_source_url or "https://example.org/mock.pdf")
+    output = _call_embedder(curriculum_id=curriculum_id, competencies=architect_output.competencies)
 
     if output.status == AgentStatus.FAILED or output.embedded_chunks == 0:
         _set_node_error(
@@ -558,13 +522,23 @@ def generate_node(state: GraphState) -> GraphState:
         },
     )
 
-    llm = get_llm_provider({"provider": "dummy"})
+    llm = get_llm_provider()
     prompt = (
         f"Generate lesson plan for {state.normalized_grade} {state.normalized_subject} "
         f"in {state.normalized_country}. Include citations."
     )
     resp = llm.call(prompt, max_tokens=512)
-    generated = resp.text if resp.ok and resp.text else "# Lesson Plan\n\n- Citation: curriculum::1"
+    if not resp.ok or not resp.text:
+        _set_node_error(
+            state,
+            node="Generate",
+            code="GENERATION_CALL_FAILED",
+            message="LLM provider failed to generate content",
+            retryable=True,
+        )
+        raise ValueError(state.error_message)
+        
+    generated = resp.text
 
     citation_count = generated.lower().count("citation")
     coverage = 0.92 if citation_count > 0 else 0.4
