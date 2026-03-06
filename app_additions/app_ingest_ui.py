@@ -6,7 +6,7 @@ Integrated with secure server-side search.
 
 import streamlit as st
 import logging
-from src.ingestion.search import search_web
+from src.agents.scout import ScoutAgent
 from src.ingestion.gatekeeper import infer_authority
 from src.ingestion.worker import ingest_sync
 
@@ -24,17 +24,57 @@ def add_curriculum_tab(current_user_id: str):
     
     # --- 1. SEARCH SECTION ---
     with st.form("search_form"):
-        col1, col2 = st.columns([4, 1])
-        query = col1.text_input("Find Official Curricula", placeholder="e.g., 'UK Year 6 History Curriculum'")
-        submitted = col2.form_submit_button("🔍 Search Web")
+        col1, col2, col3 = st.columns(3)
+        country = col1.text_input("Country", placeholder="e.g., UK")
+        grade = col2.text_input("Grade Level", placeholder="e.g., Year 9")
+        subject = col3.text_input("Subject", placeholder="e.g., Science")
+        submitted = st.form_submit_button("🔍 Search Web")
     
-    if submitted and query:
-        with st.spinner("Searching secure sources..."):
+    if submitted and country and grade and subject:
+        with st.spinner("Translating query & Searching secure sources..."):
             try:
-                # Direct call to backend logic (simulating API call for now since we are in-process)
-                # In a split deployment, this would be requests.post(API_URL)
-                results = search_web(query, max_results=10)
-                st.session_state["search_results"] = results
+                import asyncio
+                
+                async def run_scout():
+                    agent = ScoutAgent()
+                    # Generate semantic queries
+                    queries = await agent._generate_queries(country, grade, subject)
+                    st.info(f"LLM Generated Semantic Queries: {queries}")
+                    
+                    # Execute searches
+                    all_urls = []
+                    for q in queries:
+                        results = await agent._execute_search_queries([q], "us-en")
+                        all_urls.extend(results)
+                        
+                    # Deduplicate and sort
+                    unique_map = {}
+                    for r in all_urls:
+                        if r.url not in unique_map:
+                            unique_map[r.url] = r
+                    
+                    final_list = list(unique_map.values())
+                    # Sort official first
+                    final_list.sort(key=lambda x: not x.official_hint)
+                    return final_list
+
+                # Run async scout agent from Streamlit UI
+                results = asyncio.run(run_scout())
+                
+                # Convert domain objects back to standard dicts for rendering
+                rendering_results = []
+                for r in results:
+                    rendering_results.append({
+                        "title": r.title,
+                        "url": r.url,
+                        "snippet": r.snippet,
+                        "domain": r.domain,
+                        "official_hint": r.official_hint,
+                        "final_url": r.url,
+                        "content_type": "text/html"
+                    })
+                
+                st.session_state["search_results"] = rendering_results
             except Exception as e:
                 st.error(f"Search failed: {e}")
 
