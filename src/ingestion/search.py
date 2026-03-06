@@ -11,10 +11,10 @@ CACHE = TTLCache(maxsize=2000, ttl=24*3600)  # 24h cache for queries
 
 # Configuration knobs
 MAX_RESULTS_PER_QUERY = 10
-SEARCH_DELAY_SECONDS = 0.6  # polite delay between internal queries
+SEARCH_DELAY_SECONDS = 2.0  # polite delay between internal queries
 HEAD_TIMEOUT = 6
 VALID_SCHEMES = {"http", "https"}
-PREFERRED_TLDS = (".gov", ".edu", ".ac.uk", ".gov.uk")
+PREFERRED_TLDS = (".gov", ".edu", ".ac.uk", ".gov.uk", ".gov.ng", ".edu.ng", ".gov.au", ".edu.au", ".gc.ca", ".gov.za", ".ac.za")
 
 def _is_official_domain(url: str) -> bool:
     try:
@@ -63,18 +63,29 @@ def _validate_link(url: str) -> Optional[Dict]:
         logger.debug("HEAD-check failed for %s: %s", url, e)
         return None
 
-def _expand_queries(query: str) -> List[str]:
+def _expand_queries(query: str, region: str = "us-en") -> List[str]:
     """
     Query expansion ordering: narrow → medium → broad
     """
+    q_low = query.lower()
+    gov_tld = ".gov"
+    edu_tld = ".edu"
+    
+    if "uk " in q_low or "united kingdom" in q_low or region == "uk-en":
+        gov_tld = ".gov.uk"
+        edu_tld = ".ac.uk"
+    elif "ng " in q_low or "nigeria" in q_low or region == "ng-en":
+        gov_tld = ".gov.ng"
+        edu_tld = ".edu.ng"
+    elif "au " in q_low or "australia" in q_low or region == "au-en":
+        gov_tld = ".gov.au"
+        edu_tld = ".edu.au"
+
     return [
         f"filetype:pdf {query} curriculum",
-        f"{query} curriculum site:.gov",
-        f"{query} syllabus site:.gov",
-        f"{query} curriculum site:.edu",
-        f"{query} curriculum standards pdf",  # Stronger keyword fallback
-        f"{query} syllabus",
-        f"{query} education framework" # Better than just {query}
+        f"{query} curriculum site:{gov_tld}",
+        f"{query} syllabus site:{gov_tld}",
+        f"{query} curriculum site:{edu_tld}"
     ]
 
 def _is_relevant(r: dict, query_terms: List[str]) -> bool:
@@ -121,7 +132,7 @@ def search_web(query: str, max_results: int = 10, region: str = "us-en", use_cac
     collected = []
     seen = set()
     ddgs = DDGS()
-    queries = _expand_queries(query)
+    queries = _expand_queries(query, region=region)
     
     query_terms = query.split()
 
