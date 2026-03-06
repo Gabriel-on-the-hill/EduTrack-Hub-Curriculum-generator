@@ -14,12 +14,20 @@ MAX_RESULTS_PER_QUERY = 10
 SEARCH_DELAY_SECONDS = 2.0  # polite delay between internal queries
 HEAD_TIMEOUT = 6
 VALID_SCHEMES = {"http", "https"}
-PREFERRED_TLDS = (".gov", ".edu", ".ac.uk", ".gov.uk", ".gov.ng", ".edu.ng", ".gov.au", ".edu.au", ".gc.ca", ".gov.za", ".ac.za")
+def _get_target_tlds(query: str, region: str = "us-en") -> List[str]:
+    q_low = query.lower()
+    if "uk " in q_low or "united kingdom" in q_low or region == "uk-en":
+        return [".gov.uk", ".ac.uk", ".sch.uk"]
+    elif "ng " in q_low or "nigeria" in q_low or region == "ng-en":
+        return [".gov.ng", ".edu.ng"]
+    elif "au " in q_low or "australia" in q_low or region == "au-en":
+        return [".gov.au", ".edu.au"]
+    return [".gov", ".edu"]
 
-def _is_official_domain(url: str) -> bool:
+def _is_official_domain(url: str, target_tlds: List[str]) -> bool:
     try:
         host = (urlparse(url).hostname or "").lower()
-        return host.endswith(PREFERRED_TLDS) or any(host.endswith(t) for t in PREFERRED_TLDS)
+        return any(host.endswith(t) for t in target_tlds)
     except Exception:
         return False
 
@@ -63,23 +71,12 @@ def _validate_link(url: str) -> Optional[Dict]:
         logger.debug("HEAD-check failed for %s: %s", url, e)
         return None
 
-def _expand_queries(query: str, region: str = "us-en") -> List[str]:
+def _expand_queries(query: str, target_tlds: List[str]) -> List[str]:
     """
     Query expansion ordering: narrow → medium → broad
     """
-    q_low = query.lower()
-    gov_tld = ".gov"
-    edu_tld = ".edu"
-    
-    if "uk " in q_low or "united kingdom" in q_low or region == "uk-en":
-        gov_tld = ".gov.uk"
-        edu_tld = ".ac.uk"
-    elif "ng " in q_low or "nigeria" in q_low or region == "ng-en":
-        gov_tld = ".gov.ng"
-        edu_tld = ".edu.ng"
-    elif "au " in q_low or "australia" in q_low or region == "au-en":
-        gov_tld = ".gov.au"
-        edu_tld = ".edu.au"
+    gov_tld = target_tlds[0] if target_tlds else ".gov"
+    edu_tld = target_tlds[1] if len(target_tlds) > 1 else ".edu"
 
     return [
         f"filetype:pdf {query} curriculum",
@@ -132,7 +129,8 @@ def search_web(query: str, max_results: int = 10, region: str = "us-en", use_cac
     collected = []
     seen = set()
     ddgs = DDGS()
-    queries = _expand_queries(query, region=region)
+    target_tlds = _get_target_tlds(query, region)
+    queries = _expand_queries(query, target_tlds)
     
     query_terms = query.split()
 
@@ -159,7 +157,7 @@ def search_web(query: str, max_results: int = 10, region: str = "us-en", use_cac
                 }
                 # Keep official domains even when text snippets are sparse/noisy.
                 # This preserves authoritative sources while still filtering most noise.
-                if not _is_relevant(temp_res, query_terms) and not _is_official_domain(url):
+                if not _is_relevant(temp_res, query_terms) and not _is_official_domain(url, target_tlds):
                     continue
 
                 # lightweight validation (HEAD)
@@ -174,7 +172,7 @@ def search_web(query: str, max_results: int = 10, region: str = "us-en", use_cac
                     "url": url,
                     "snippet": temp_res["snippet"],
                     "domain": domain,
-                    "official_hint": _is_official_domain(url),
+                    "official_hint": _is_official_domain(url, target_tlds),
                     "final_url": info["final_url"],
                     "content_type": info.get("content_type")
                 }

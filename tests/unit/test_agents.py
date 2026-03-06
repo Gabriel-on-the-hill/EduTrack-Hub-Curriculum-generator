@@ -20,15 +20,23 @@ from src.schemas.base import AgentStatus, AuthorityHint, LicenseType
 class TestScoutAgent:
     """Tests for Scout agent."""
 
-    def test_query_generation(self) -> None:
+    @pytest.mark.asyncio
+    async def test_query_generation(self) -> None:
         """Should generate max 5 search queries."""
         from src.agents.scout import ScoutAgent
+        from unittest.mock import AsyncMock
         
         agent = ScoutAgent()
-        queries = agent._generate_queries("Nigeria", "Grade 9", "Biology")
+        # Mock the LLM to return reliable dummy queries
+        agent._client.generate_text = AsyncMock(return_value="""
+        nigeria biology curriculum official
+        nigeria grade 9 biology framework
+        """)
+        
+        queries = await agent._generate_queries("Nigeria", "Grade 9", "Biology")
         
         assert len(queries) <= 5
-        assert all("Nigeria" in q or "nigeria" in q.lower() for q in queries)
+        assert len(queries) == 2
 
     def test_authority_detection_official(self) -> None:
         """Should detect official government domains."""

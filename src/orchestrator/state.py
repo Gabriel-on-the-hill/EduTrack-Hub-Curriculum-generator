@@ -11,7 +11,7 @@ Per Blueprint Section 14.4:
 - Halts are explicit states
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any
 from uuid import UUID
@@ -200,7 +200,7 @@ class GraphState(BaseModel):
         execution = NodeExecution(
             node_name=node_name,
             status=NodeStatus.RUNNING,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
         )
         self.node_history.append(execution)
     
@@ -209,7 +209,7 @@ class GraphState(BaseModel):
         for execution in reversed(self.node_history):
             if execution.node_name == node_name and execution.status == NodeStatus.RUNNING:
                 execution.status = NodeStatus.SUCCESS
-                execution.completed_at = datetime.utcnow()
+                execution.completed_at = datetime.now(timezone.utc)
                 execution.output_data = output
                 break
         self.current_node = None
@@ -219,7 +219,7 @@ class GraphState(BaseModel):
         for execution in reversed(self.node_history):
             if execution.node_name == node_name and execution.status == NodeStatus.RUNNING:
                 execution.status = NodeStatus.FAILED
-                execution.completed_at = datetime.utcnow()
+                execution.completed_at = datetime.now(timezone.utc)
                 execution.error_message = error
                 break
         self.has_error = True

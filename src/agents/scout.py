@@ -118,7 +118,7 @@ class ScoutAgent:
         
         try:
             # Generate search queries
-            queries = self._generate_queries(country, grade, subject)
+            queries = await self._generate_queries(country, grade, subject)
             
             # Execute searches
             all_urls: list[CandidateUrl] = []
@@ -150,23 +150,56 @@ class ScoutAgent:
             logger.error(f"Scout agent failed: {e}")
             return ScoutOutput(
                 job_id=job_id,
-                queries=self._generate_queries(country, grade, subject),
+                queries=self._generate_static_queries(country, grade, subject),
                 candidate_urls=[],
                 status=AgentStatus.FAILED,
             )
     
-    def _generate_queries(
+    async def _generate_queries(
         self,
         country: str,
         grade: str,
         subject: str,
     ) -> list[str]:
         """
-        Generate search queries for curriculum discovery.
+        Generate search queries for curriculum discovery using LLM translation.
         
         Blueprint: Max 5 queries.
         Handles both K-12 and university-level curricula.
         """
+        prompt = f"""
+You are an expert educational researcher generating targeted DuckDuckGo search queries 
+to find official curriculum frameworks and syllabi.
+
+Target:
+- Country: {country}
+- Grade/Year Level: {grade}
+- Subject: {subject}
+
+Instructions:
+1. Identify the official educational terminology for this grade in this country (e.g. UK "Year 8" -> "Key Stage 3", US "8th Grade" -> "Middle School").
+2. Generate exactly 5 extremely specific search engine queries designed to find official PDF curriculum documents. Use the localized terminology.
+3. Output ONLY the 5 search queries, one per line. Do not number them or include explanations.
+"""
+        try:
+            response = await self._client.generate_text(prompt, temperature=0.2)
+            queries = [q.strip("- \t.1234567890") for q in response.split("\n") if q.strip()]
+            
+            if not queries:
+                raise ValueError("LLM returned empty payload.")
+                
+            return queries[:5]
+        except Exception as e:
+            logger.warning("LLM query generation failed, falling back to static strings: %s", e)
+            return self._generate_static_queries(country, grade, subject)
+
+    def _generate_static_queries(
+        self,
+        country: str,
+        grade: str,
+        subject: str,
+    ) -> list[str]:
+        """Fallback static query generation."""
         grade_lower = grade.lower()
         
         # Detect if this is a university-level request
