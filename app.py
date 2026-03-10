@@ -30,7 +30,10 @@ st.set_page_config(
 def check_password():
     """Returns `True` if the user had the correct password."""
     # 1. Get Secret
-    password = st.secrets.get("ACCESS_CODE") or os.getenv("ACCESS_CODE")
+    try:
+        password = st.secrets.get("ACCESS_CODE") or os.getenv("ACCESS_CODE")
+    except Exception:
+        password = os.getenv("ACCESS_CODE")
     
     # 2. If no password set, allow access
     if not password:
@@ -204,21 +207,36 @@ def seed_sqlite(conn):
         );
     """))
     
-    # 2. Seed Data (Use INSERT OR IGNORE)
+    # 2. Seed Data (Use INSERT OR IGNORE) — Real curriculum framework language
     conn.execute(text("""
         INSERT OR IGNORE INTO curricula (
             id, country, country_code, jurisdiction_level, jurisdiction_name, 
             grade, subject, source_authority
         ) VALUES 
         ('ng-bio-ss1', 'Nigeria', 'NG', 'National', 'NERDC', 'SS1', 'Biology', 'NERDC'),
-        ('ca-math-09', 'Canada', 'CA', 'Provincial', 'Ontario Ministry of Education', '9', 'Mathematics', 'Ministry of Education');
+        ('ca-math-09', 'Canada', 'CA', 'Provincial', 'Ontario Ministry of Education', '9', 'Mathematics', 'Ministry of Education'),
+        ('uk-sci-ks3', 'United Kingdom', 'GB', 'National', 'Department for Education', 'KS3', 'Science', 'DfE'),
+        ('gh-ict-jhs2', 'Ghana', 'GH', 'National', 'NaCCA', 'JHS 2', 'ICT', 'NaCCA'),
+        ('ke-eng-f3', 'Kenya', 'KE', 'National', 'KICD', 'Form 3', 'English', 'KICD');
     """))
     
     conn.execute(text("""
         INSERT OR IGNORE INTO competencies (id, curriculum_id, title, description, order_index) VALUES
-        ('c1', 'ng-bio-ss1', 'Cell Division', 'Understanding mitosis and meiosis processes.', 1),
-        ('c2', 'ng-bio-ss1', 'Genetics', 'Principles of heredity and variation.', 2),
-        ('c3', 'ca-math-09', 'Linear Relations', 'Graphing and solving linear equations.', 1);
+        ('c1', 'ng-bio-ss1', 'Cell Division', 'Describe the stages of mitosis and meiosis, and explain their significance in growth, repair, and sexual reproduction.', 1),
+        ('c2', 'ng-bio-ss1', 'Genetics and Heredity', 'Explain the principles of heredity, genetic crosses, and predict offspring phenotypes using Punnett squares.', 2),
+        ('c3', 'ng-bio-ss1', 'Ecology and Environment', 'Analyse food chains, food webs, and energy flow in ecosystems, and discuss human impact on the environment.', 3),
+        ('c4', 'ca-math-09', 'Linear Relations', 'Determine the equation of a line given sufficient information and graph linear relations using intercepts and slope.', 1),
+        ('c5', 'ca-math-09', 'Solving Equations', 'Solve first-degree equations involving one variable, including equations with fractional coefficients.', 2),
+        ('c6', 'ca-math-09', 'Measurement and Geometry', 'Determine the optimal values of various measurements using algebraic and geometric reasoning.', 3),
+        ('c7', 'uk-sci-ks3', 'Cells and Organisation', 'Describe the structure of plant and animal cells, and explain how cells are organised into tissues, organs, and systems.', 1),
+        ('c8', 'uk-sci-ks3', 'Atoms and the Periodic Table', 'Describe the structure of an atom and use the periodic table to predict the properties of elements.', 2),
+        ('c9', 'uk-sci-ks3', 'Forces and Motion', 'Calculate speed from distance-time data, describe the effects of balanced and unbalanced forces, and explain friction.', 3),
+        ('c10', 'gh-ict-jhs2', 'Introduction to Coding', 'Write simple programs using Scratch or Python to solve everyday problems, applying sequence, selection, and iteration.', 1),
+        ('c11', 'gh-ict-jhs2', 'Spreadsheet Applications', 'Use spreadsheet software to enter data, create formulae, and produce appropriate charts for data presentation.', 2),
+        ('c12', 'gh-ict-jhs2', 'Internet Safety', 'Identify online risks and demonstrate safe practices for browsing, social media, and digital communication.', 3),
+        ('c13', 'ke-eng-f3', 'Creative Writing', 'Compose imaginative and descriptive essays demonstrating varied sentence structures, figurative language, and coherent organisation.', 1),
+        ('c14', 'ke-eng-f3', 'Oral Skills and Listening', 'Participate in debates and discussions using persuasive techniques, appropriate register, and active listening skills.', 2),
+        ('c15', 'ke-eng-f3', 'Grammar and Usage', 'Apply advanced grammatical rules including reported speech, conditional sentences, and subject-verb agreement in writing.', 3);
     """))
     conn.commit()
 
@@ -266,6 +284,12 @@ def main_dashboard():
         # Navigation
         app_mode = st.radio("Navigation", ["Create Resources", "Add Curriculum", "Review Dashboard"])
         st.markdown("---")
+
+        st.info(
+            "**📚 Create Resources** — Generate teaching materials from your curricula\n\n"
+            "**🔍 Add Curriculum** — Search & ingest new official curriculum sources\n\n"
+            "**📋 Review Dashboard** — Approve or reject pending ingestion jobs"
+        )
 
         with st.expander("Advanced Options"):
              if st.button("🧹 Clear Cache"):
@@ -317,7 +341,9 @@ def main_dashboard():
 
     # --- Main Content Area ---
     
-
+    # Hero Section
+    st.markdown("## ✨ Create Resources")
+    st.caption("Generate curriculum-aligned teaching materials powered by AI")
     st.markdown("---")
 
     # Fetch Data
@@ -346,10 +372,12 @@ def main_dashboard():
     # 3. Action Button (Full Width)
     if st.button("✨ Generate Content", type="primary", use_container_width=True):
         run_generation(topic, output_format, difficulty, competencies, selected_id)
+    else:
+        # 4. "How it works" placeholder shown before first generation
+        if "generation_done" not in st.session_state:
+            st.markdown("""\n---\n#### How It Works\n\n1. **Select** a curriculum and learning objective from the sidebar\n2. **Choose** your document type and target proficiency\n3. **Click Generate** to create AI-powered, curriculum-aligned content\n4. **Review** the output — grounded against official competencies\n""")
 
-    # 4. Results Area (Full Width)
-    # The 'run_generation' function will need to output here.
-    # We moved the logic inside run_generation to use st.container instead of HTML div.
+    # 5. Results Area (Full Width)
 
 # --- PROVISIONING ---
 @st.cache_resource

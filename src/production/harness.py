@@ -260,7 +260,7 @@ class ProductionHarness:
         return SyntheticCurriculumOutput(
             config=syn_config,
             content_markdown=content,
-            metrics={"model": "gemini-2.0-flash", "generated_at": datetime.now().isoformat()},
+            metrics={"model": "gemini-2.0-flash", "generated_at": datetime.now(tz=timezone.utc).isoformat()},
             metadata={"provenance": self.primary_provenance.to_dict()}
         )
 
@@ -304,6 +304,6 @@ class ProductionHarness:
         return SyntheticCurriculumOutput(
             config=syn_config,
             content_markdown=content,
-            metrics={"model": "gemini-2.0-pro-shadow", "generated_at": datetime.now().isoformat()},
+            metrics={"model": "gemini-2.0-pro-shadow", "generated_at": datetime.now(tz=timezone.utc).isoformat()},
             metadata={"provenance": self.shadow_provenance.to_dict()}
         )

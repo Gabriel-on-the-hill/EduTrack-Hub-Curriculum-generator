@@ -1,5 +1,6 @@
 import time
 import logging
+import os
 from typing import List, Dict, Optional
 from urllib.parse import urlparse, urljoin
 import requests
@@ -8,6 +9,13 @@ from ddgs import DDGS
 
 logger = logging.getLogger(__name__)
 CACHE = TTLCache(maxsize=2000, ttl=24*3600)  # 24h cache for queries
+
+# --- SEARCH PROVIDER SELECTION ---
+# If Google CSE keys are set, use Google for dramatically better results.
+# Otherwise, fall back to DuckDuckGo (free, no API key needed).
+GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY")
+GOOGLE_CSE_CX = os.getenv("GOOGLE_CSE_CX")
+USE_GOOGLE_CSE = bool(GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX)
 
 # Configuration knobs
 MAX_RESULTS_PER_QUERY = 10
@@ -118,14 +126,95 @@ def _is_relevant(r: dict, query_terms: List[str]) -> bool:
              
     return hits >= 2 # Require at least 2 relevant signals (e.g. "science" + "curriculum")
 
+
+# =============================================================================
+# GOOGLE CUSTOM SEARCH ENGINE (OPTIONAL UPGRADE)
+# =============================================================================
+
+def _google_cse_search(query: str, max_results: int = 10, region: str = "us-en") -> List[Dict]:
+    """
+    Search using Google Custom Search Engine API.
+    Returns results in the same format as the DDGS search for drop-in compatibility.
+    
+    Requires GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX environment variables.
+    """
+    target_tlds = _get_target_tlds(query, region)
+    collected = []
+    seen = set()
+    
+    # Google CSE returns max 10 per page; use start param for pagination
+    for start_index in [1, 11]:
+        if len(collected) >= max_results:
+            break
+            
+        try:
+            resp = requests.get(
+                "https://www.googleapis.com/customsearch/v1",
+                params={
+                    "key": GOOGLE_CSE_API_KEY,
+                    "cx": GOOGLE_CSE_CX,
+                    "q": f"{query} curriculum",
+                    "num": min(10, max_results - len(collected)),
+                    "start": start_index,
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            logger.warning("Google CSE call failed: %s", e)
+            break
+        
+        for item in data.get("items", []):
+            url = item.get("link", "")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            
+            domain = (urlparse(url).hostname or "")
+            official = _is_official_domain(url, target_tlds)
+            
+            collected.append({
+                "title": item.get("title", ""),
+                "url": url,
+                "snippet": item.get("snippet", ""),
+                "domain": domain,
+                "official_hint": official,
+                "final_url": url,
+                "content_type": item.get("mime", "text/html"),
+            })
+    
+    # Prioritize official domains
+    collected.sort(key=lambda r: (not r.get("official_hint"), r.get("domain", "")))
+    return collected[:max_results]
+
+
+# =============================================================================
+# MAIN SEARCH FUNCTION
+# =============================================================================
+
 def search_web(query: str, max_results: int = 10, region: str = "us-en", use_cache: bool = True) -> List[Dict]:
     """
     Returns list of results: [{'title','url','snippet','domain','official_hint','final_url','content_type'}]
+    
+    Uses Google Custom Search if GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX are configured.
+    Falls back to DuckDuckGo (free, no API key) otherwise.
     """
     cache_key = f"search:{region}:{query}:{max_results}"
     if use_cache and cache_key in CACHE:
         return CACHE[cache_key]
-
+    
+    # --- GOOGLE CSE PATH (when configured) ---
+    if USE_GOOGLE_CSE:
+        logger.info("Using Google Custom Search for: %s", query)
+        results = _google_cse_search(query, max_results, region)
+        if results:
+            if use_cache:
+                CACHE[cache_key] = results
+            return results
+        logger.warning("Google CSE returned no results, falling back to DuckDuckGo")
+    
+    # --- DUCKDUCKGO PATH (default / fallback) ---
     collected = []
     seen = set()
     ddgs = DDGS()

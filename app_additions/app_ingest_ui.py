@@ -20,14 +20,15 @@ except ImportError:
     REDIS_URL = None
 
 def add_curriculum_tab(current_user_id: str):
-    st.header("Search & Add Curriculum")
+    st.header("🔍 Search & Add Curriculum")
+    st.caption("Find official government curriculum documents and ingest them into EduTrack")
     
     # --- 1. SEARCH SECTION ---
     with st.form("search_form"):
         col1, col2, col3 = st.columns(3)
-        country = col1.text_input("Country", placeholder="e.g., UK")
-        grade = col2.text_input("Grade Level", placeholder="e.g., Year 9")
-        subject = col3.text_input("Subject", placeholder="e.g., Science")
+        country = col1.text_input("Country", placeholder="e.g., UK, Nigeria", help="The country whose curriculum you want to find")
+        grade = col2.text_input("Grade Level", placeholder="e.g., Year 9, SS1", help="The grade/year level (we translate to official terminology automatically)")
+        subject = col3.text_input("Subject", placeholder="e.g., Science, Biology", help="The subject area to search for")
         submitted = st.form_submit_button("🔍 Search Web")
     
     if submitted and country and grade and subject:
@@ -37,51 +38,44 @@ def add_curriculum_tab(current_user_id: str):
                 
                 async def run_scout():
                     agent = ScoutAgent()
-                    # Generate semantic queries
-                    queries = await agent._generate_queries(country, grade, subject)
-                    st.info(f"LLM Generated Semantic Queries: {queries}")
-                    
-                    # Execute searches
-                    all_urls = []
-                    for q in queries:
-                        results = await agent._execute_search_queries([q], "us-en")
-                        all_urls.extend(results)
-                        
-                    # Deduplicate and sort
-                    unique_map = {}
-                    for r in all_urls:
-                        if r.url not in unique_map:
-                            unique_map[r.url] = r
-                    
-                    final_list = list(unique_map.values())
-                    # Sort official first
-                    final_list.sort(key=lambda x: not x.official_hint)
-                    return final_list
+                    # Use the public .search() method which handles
+                    # query generation, search, dedup, and ranking
+                    output = await agent.search(
+                        country=country,
+                        country_code=country[:2].upper(),
+                        grade=grade,
+                        subject=subject,
+                    )
+                    st.info(f"LLM Generated Queries: {output.queries}")
+                    return output.candidate_urls
 
                 # Run async scout agent from Streamlit UI
                 results = asyncio.run(run_scout())
                 
-                # Convert domain objects back to standard dicts for rendering
+                # Convert CandidateUrl objects to dicts for rendering
                 rendering_results = []
                 for r in results:
+                    is_official = r.authority_hint.value == "official"
                     rendering_results.append({
-                        "title": r.title,
+                        "title": r.domain,  # CandidateUrl doesn't have title
                         "url": r.url,
-                        "snippet": r.snippet,
+                        "snippet": "",
                         "domain": r.domain,
-                        "official_hint": r.official_hint,
+                        "official_hint": is_official,
                         "final_url": r.url,
                         "content_type": "text/html"
                     })
                 
                 st.session_state["search_results"] = rendering_results
             except Exception as e:
-                st.error(f"Search failed: {e}")
+                logging.getLogger(__name__).error(f"Search failed: {e}", exc_info=True)
+                st.error(f"⚠️ Search could not complete. Please check your API key configuration and try again.")
 
     # --- 2. RESULTS LIST ---
     if "search_results" in st.session_state and st.session_state["search_results"]:
-        st.subheader("Search Results")
         results = st.session_state["search_results"]
+        official_count = sum(1 for r in results if r.get("official_hint"))
+        st.subheader(f"Search Results ({len(results)} found, {official_count} official)")
         
         import html
         import requests
@@ -168,16 +162,16 @@ def add_curriculum_tab(current_user_id: str):
                 with st.spinner("Ingesting & Processing..."):
                     try:
                         res = ingest_sync(source_url)
-                        if res.status == "success":
-                            st.success("Ingestion Complete!")
-                            st.json(res.dict())
-                        elif res.status == "pending_manual_review":
-                            st.warning("Job Queued for Manual Review (License/Auth Check)")
-                            st.json(res.dict())
+                        if res["status"] == "success":
+                            st.success("✅ Ingestion Complete!")
+                            st.json(res)
+                        elif res["status"] == "pending_manual_review":
+                            st.warning("⏳ Job Queued for Manual Review (License/Auth Check)")
+                            st.json(res)
                         else:
-                            st.error(f"Ingestion Rejected: {res}")
+                            st.error(f"❌ Ingestion Rejected: {res.get('reason', 'Unknown')}")
                     except Exception as e:
-                        st.error(f"Ingestion Error: {e}")
+                        st.error(f"⚠️ Ingestion could not complete. Please try again or contact support.")
             else:
                 # Async
                 if REDIS_URL:

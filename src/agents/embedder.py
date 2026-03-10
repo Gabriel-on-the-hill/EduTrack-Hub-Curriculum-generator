@@ -20,8 +20,6 @@ from pydantic import BaseModel
 
 from src.schemas.agents import CompetencyItem, EmbedderOutput
 from src.schemas.base import AgentStatus
-import logging
-import asyncio
 
 logger = logging.getLogger(__name__)
 

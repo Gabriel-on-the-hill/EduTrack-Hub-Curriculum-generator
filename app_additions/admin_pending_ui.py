@@ -11,8 +11,9 @@ except ImportError:
     list_pending_jobs = None
 
 def render_admin_dashboard():
-    st.title("Ingestion - Pending Manual Review")
-    st.caption("Internal Governance Console")
+    st.markdown("## 📋 Review Dashboard")
+    st.caption("Approve or reject pending curriculum ingestion jobs")
+    st.markdown("---")
 
     if not list_pending_jobs:
         st.stop()
@@ -21,44 +22,48 @@ def render_admin_dashboard():
     try:
         jobs = list_pending_jobs()
     except Exception as e:
-        st.error(f"Database error: {e}")
+        st.error(f"⚠️ Could not load pending jobs. Please check the database connection.")
+        logging.getLogger(__name__).error(f"Database error: {e}", exc_info=True)
         return
 
     if not jobs:
-        st.info("No pending ingestion jobs.")
+        st.info("✅ No pending ingestion jobs. All caught up!")
     else:
+        st.metric("Pending Jobs", len(jobs))
+        st.markdown("---")
+        
         for job in jobs:
-            with st.expander(f"Job {job['job_id']} - {job['source_url']}"):
-                st.write(f"**Requested by:** {job.get('requested_by')}")
-                st.write(f"**Reason:** {job.get('decision_reason')}")
-                st.write(f"**Created:** {job.get('created_at')}")
+            with st.expander(f"⏳ Job {job['job_id'][:12]}... — {job['source_url']}", expanded=False):
+                col_info, col_actions = st.columns([3, 1])
                 
-                col1, col2 = st.columns(2)
+                with col_info:
+                    st.markdown(f"**Source:** [{job['source_url']}]({job['source_url']})")
+                    st.markdown(f"**Requested by:** {job.get('requested_by', 'Unknown')}")
+                    st.markdown(f"**Reason:** {job.get('decision_reason', 'N/A')}")
+                    st.caption(f"Created: {job.get('created_at', 'Unknown')}")
                 
-                # Preview logic (could be added here if we want to fetch the snippet from DB or re-fetch)
-                # For now, simplistic.
-                
-                if col1.button(f"Approve", key=f"approve-{job['job_id']}"):
-                    try:
-                        ok = approve_ingestion_job(job['job_id'])
-                        if ok:
-                            st.success(f"Job {job['job_id']} Approved & Enqueued")
-                            st.rerun()
-                        else:
-                            st.error("Approval failed (ID not found?)")
-                    except Exception as e:
-                        st.error(f"Error approving: {e}")
-                
-                if col2.button(f"Reject", key=f"reject-{job['job_id']}"):
-                    try:
-                        ok = reject_ingestion_job(job['job_id'])
-                        if ok:
-                            st.success(f"Job {job['job_id']} Rejected")
-                            st.rerun()
-                        else:
-                            st.error("Rejection failed")
-                    except Exception as e:
-                        st.error(f"Error rejecting: {e}")
+                with col_actions:
+                    if st.button("✅ Approve", key=f"approve-{job['job_id']}", type="primary"):
+                        try:
+                            ok = approve_ingestion_job(job['job_id'])
+                            if ok:
+                                st.success(f"Approved & Enqueued!")
+                                st.rerun()
+                            else:
+                                st.error("Approval failed (ID not found?)")
+                        except Exception as e:
+                            st.error(f"⚠️ Error approving job. Please try again.")
+                    
+                    if st.button("❌ Reject", key=f"reject-{job['job_id']}"):
+                        try:
+                            ok = reject_ingestion_job(job['job_id'])
+                            if ok:
+                                st.success(f"Job Rejected")
+                                st.rerun()
+                            else:
+                                st.error("Rejection failed")
+                        except Exception as e:
+                            st.error(f"⚠️ Error rejecting job. Please try again.")
 
 if __name__ == "__main__":
     render_admin_dashboard()
