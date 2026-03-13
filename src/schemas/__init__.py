@@ -16,7 +16,13 @@ from src.schemas.agents import (
     ArchitectOutput,
     EmbedderOutput,
 )
-from src.schemas.generation import GenerationRequest, GenerationOutput
+from src.schemas.generation import (
+    GenerationRequest,
+    GenerationOutput,
+    GenerationJobAck,
+    GenerationJobStatus,
+    ErrorEnvelope,
+)
 from src.schemas.curriculum import Curriculum, Competency
 
 __all__ = [
@@ -29,6 +35,9 @@ __all__ = [
     "EmbedderOutput",
     "GenerationRequest",
     "GenerationOutput",
+    "GenerationJobAck",
+    "GenerationJobStatus",
+    "ErrorEnvelope",
     "Curriculum",
     "Competency",
 ]
