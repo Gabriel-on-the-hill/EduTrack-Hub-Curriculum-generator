@@ -33,6 +33,9 @@ from src.schemas.generation import (
     GenerationOutput,
     Citation,
     SourceAttribution,
+    GenerationJobAck,
+    GenerationJobStatus,
+    ErrorEnvelope,
 )
 from src.schemas.base import CurriculumMode
 from src.schemas.curriculum import Curriculum, Competency
@@ -235,6 +238,74 @@ class TestScoutOutput:
                 candidate_urls=[],  # No URLs
                 status=AgentStatus.SUCCESS,  # But claims success
             )
+
+
+
+
+class TestGenerationRequest:
+    """Tests for GenerationRequest async API contract inputs."""
+
+    def test_valid_request_with_client_request_id(self) -> None:
+        """Valid generation request should be accepted."""
+        req = GenerationRequest(
+            curriculum_id=uuid4(),
+            request_type=GenerationRequestType.LESSON_PLAN,
+            competency_ids=[uuid4()],
+            constraints={"duration": "45 minutes", "offline_friendly": True},
+            client_request_id="req_123",
+        )
+        assert req.client_request_id == "req_123"
+
+    def test_rejects_quiz_without_competencies(self) -> None:
+        """Quiz generation must include competency_ids."""
+        with pytest.raises(ValidationError):
+            GenerationRequest(
+                curriculum_id=uuid4(),
+                request_type=GenerationRequestType.QUIZ,
+                client_request_id="req_123",
+            )
+
+    def test_rejects_duration_for_summary(self) -> None:
+        """Summary request cannot include duration constraint."""
+        with pytest.raises(ValidationError):
+            GenerationRequest(
+                curriculum_id=uuid4(),
+                request_type=GenerationRequestType.SUMMARY,
+                constraints={"duration": "20 minutes"},
+                client_request_id="req_123",
+            )
+
+
+class TestGenerationAsyncResponses:
+    """Tests for async acknowledgement and status payloads."""
+
+    def test_valid_job_ack(self) -> None:
+        """Queued acknowledgement must include poll URL."""
+        ack = GenerationJobAck(
+            job_id=uuid4(),
+            status="queued",
+            poll_url="/api/generation/jobs/abc",
+        )
+        assert ack.status == "queued"
+
+    def test_rejects_invalid_job_status(self) -> None:
+        """Only queued/running/succeeded/failed are valid job statuses."""
+        with pytest.raises(ValidationError):
+            GenerationJobStatus(job_id=uuid4(), status="done")
+
+
+class TestErrorEnvelope:
+    """Tests for standardized API error contract."""
+
+    def test_valid_error_envelope(self) -> None:
+        """Error envelope supports optional details."""
+        err = ErrorEnvelope(
+            code="INVALID_REQUEST",
+            message="request_type does not support duration",
+            retryable=False,
+            details={"field": "constraints.duration"},
+        )
+        assert err.retryable is False
 
 
 # =============================================================================
