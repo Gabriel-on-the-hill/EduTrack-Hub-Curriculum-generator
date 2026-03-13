@@ -8,8 +8,10 @@ Run with: streamlit run app.py
 import streamlit as st
 import os
 import time
+import requests
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from src.ingestion.services import save_resource
 
 # Load environment (optional)
 try:
@@ -153,7 +155,10 @@ st.markdown("""
 def get_db_engine():
     """Create database connection."""
     # Try Streamlit secrets first (for Streamlit Cloud), then env var (for local)
-    db_url = st.secrets.get("DATABASE_URL") if "DATABASE_URL" in st.secrets else os.getenv("DATABASE_URL")
+    try:
+        db_url = st.secrets.get("DATABASE_URL") if "DATABASE_URL" in st.secrets else os.getenv("DATABASE_URL")
+    except Exception:
+        db_url = os.getenv("DATABASE_URL")
     
     # FALLBACK: Use local SQLite if no real DB configured
     if not db_url:
@@ -264,6 +269,8 @@ def fetch_competencies(engine, curriculum_id: str):
             {"cid": curriculum_id}
         )
         return [dict(row._mapping) for row in result]
+
+
 
 # Main Application Logic
 def main_dashboard():
@@ -416,34 +423,24 @@ def get_harness():
 
 
 def run_generation(topic, fmt, diff, comps, curriculum_id):
-    """Execute the Real Production Chain."""
-    harness = get_harness()
-    if not harness:
-        st.error("Engine Initialization Failed")
+    """Submit generation through Hub API, poll status, and persist successful output."""
+    engine = get_db_engine()
+    if not engine:
+        st.error("Database unavailable")
         return
 
     # Find Topic Details
     selected_comp = next(c for c in comps if c['title'] == topic)
     
-    # Build Config Object (Adapter for Harness)
-    # Using a simple namespace/dict as "Any" config for now, 
-    # compatible with the _run_generation signature we just added.
-    from collections import namedtuple
-    Config = namedtuple('Config', [
-        'topic_title', 'topic_description', 
-        'content_format', 'target_level', 
-        'jurisdiction', 'grade', 'rng_seed'
-    ])
-    
-    config = Config(
-        topic_title=topic,
-        topic_description=selected_comp['description'],
-        content_format=fmt,
-        target_level=diff,
-        jurisdiction="National", # Derived from DB in real app
-        grade="Standard",
-        rng_seed=42 # Deterministic for demo
-    )
+    payload = {
+        "curriculum_id": str(curriculum_id),
+        "topic_title": topic,
+        "topic_description": selected_comp["description"],
+        "content_format": fmt,
+        "target_level": diff,
+        "requested_by": st.session_state.get("user_id", "streamlit-admin"),
+    }
+    hub_api_url = os.getenv("HUB_API_URL", "http://localhost:8000").rstrip("/")
 
     # UI Feedback Loop
     with st.status("⚡ Engaged Production Engine", expanded=True) as status:
@@ -453,50 +450,58 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
         time.sleep(0.5)
         
         try:
-            import asyncio
-            
-            st.write("🧠 **LLM:** Generating Content (Gemini Flash)...")
-            
-            # Build provenance for governance enforcement
+            st.write("📨 **Hub API:** Submitting job to /api/generator/jobs...")
+            create_resp = requests.post(f"{hub_api_url}/api/generator/jobs", json=payload, timeout=20)
+            create_resp.raise_for_status()
+            job_payload = create_resp.json()
+            job_id = job_payload["job_id"]
+            st.write(f"🆔 Job queued: `{job_id}`")
+
+            max_polls = 30
+            final_status = "queued"
+            job_data = {}
+            for _ in range(max_polls):
+                poll_resp = requests.get(f"{hub_api_url}/api/generator/jobs/{job_id}", timeout=20)
+                poll_resp.raise_for_status()
+                job_data = poll_resp.json()
+                final_status = job_data.get("status", "queued")
+                if final_status in {"succeeded", "failed"}:
+                    break
+                st.write(f"⏱️ Job status: `{final_status}`... polling")
+                time.sleep(2)
+
+            if final_status != "succeeded":
+                status.update(label="❌ Generation Failed", state="error")
+                st.error(f"Generation failed with status: {final_status}")
+                if job_data.get("error"):
+                    st.error(f"Generator error: {job_data.get('error')}")
+                return
+
+            content_markdown = job_data.get("content_markdown") or job_data.get("result", {}).get("content_markdown")
+            if not content_markdown:
+                status.update(label="❌ Generation Failed", state="error")
+                st.error("Generator did not return content_markdown")
+                return
+
             provenance = {
-                "curriculum_id": str(curriculum_id),
-                "source_list": [{"url": "https://edutrack.demo", "authority": "EduTrack", "fetch_date": "2026-02-15"}],
-                "retrieval_timestamp": "2026-02-15T00:00:00Z",
-                "extraction_confidence": 0.95,
-                "user_id": "demo-user",
-                "session": "streamlit"
+                "generator_job_id": job_id,
+                "generator_status": final_status,
+                "requested_payload": payload,
+                "generator_response_meta": {
+                    "completed_at": job_data.get("completed_at"),
+                    "model": job_data.get("model"),
+                },
             }
-            
-            # Call the full production pipeline safely in Streamlit's event loop
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-            payload = loop.run_until_complete(
-                harness.generate_artifact(curriculum_id, config, provenance)
-            )
-            
+            resource_id = save_resource(str(curriculum_id), topic, content_markdown, provenance)
+
             status.update(label="✅ Generation Complete", state="complete", expanded=False)
-            
-            # Display Result
             st.markdown("---")
             st.subheader("Generated Artifact")
-            
-            # Use native container with scroll for better UX
             with st.container(height=600, border=True):
-                st.markdown(payload.content_markdown)
-            
-            # Governance Badge
-            st.success("✅ **Governance Verified**")
-            
-            # Download
-            st.download_button(
-                "📥 Download Artifact",
-                payload.content_markdown,
-                file_name=f"{topic}.md"
-            )
+                st.markdown(content_markdown)
+
+            st.success(f"✅ Saved to Resource store (ID: `{resource_id}`)")
+            st.download_button("📥 Download Artifact", content_markdown, file_name=f"{topic}.md")
             
         except Exception as e:
             status.update(label="❌ Generation Failed", state="error")

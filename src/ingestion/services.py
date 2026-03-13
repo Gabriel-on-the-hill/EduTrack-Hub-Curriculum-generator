@@ -11,6 +11,8 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from datetime import datetime
 import shutil
 import os
+import json
+import uuid
 from typing import List, Dict, Any
 from .schemas import StandardizedCompetency, CompetencyMetadata
 
@@ -36,6 +38,39 @@ class IngestionJob(Base):
     status = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
+
+
+class Resource(Base):
+    __tablename__ = "resources"
+
+    id = Column(String, primary_key=True)
+    curriculum_id = Column(String, nullable=False)
+    title = Column(String, nullable=False)
+    content_markdown = Column(Text, nullable=False)
+    provenance_metadata = Column(JSON)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+def save_resource(curriculum_id: str, title: str, content_markdown: str, provenance_metadata: Dict[str, Any]) -> str:
+    """Persist a generated resource with provenance metadata."""
+    session = get_db_session()
+    resource_id = str(uuid.uuid4())
+    try:
+        # Ensure resources table exists even in lightweight SQLite/dev setups
+        Resource.__table__.create(bind=session.bind, checkfirst=True)
+        resource = Resource(
+            id=resource_id,
+            curriculum_id=curriculum_id,
+            title=title,
+            content_markdown=content_markdown,
+            provenance_metadata=provenance_metadata,
+        )
+        session.add(resource)
+        session.commit()
+        return resource_id
+    finally:
+        session.close()
 
 class CurriculumChunk(Base):
     __tablename__ = "curriculum_chunks"
@@ -127,7 +162,6 @@ def store_curriculum_and_chunks(curriculum_id: str, url: str, competencies: List
 
 # --- Phase 3 Services ---
 from sqlalchemy import text
-import uuid
 
 def store_standardized_competencies(curriculum_id: str, standardized_list: List[StandardizedCompetency]):
     """
