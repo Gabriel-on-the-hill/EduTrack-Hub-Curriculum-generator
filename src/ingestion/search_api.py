@@ -19,7 +19,7 @@ class SearchRequest(BaseModel):
     query: str
     max_results: int = 10
 
-@router.post("/api/ingest/search")
+@router.post("/search")
 @limiter.limit("5/minute")
 def search(request: Request, req: SearchRequest):
     # Check cache manually or use decorator
@@ -39,7 +39,7 @@ def search(request: Request, req: SearchRequest):
     return {"results": annotated}
 
 
-@router.get("/api/ingest/preview")
+@router.get("/preview")
 @limiter.limit("10/minute")
 def preview(request: Request, url: str):
     try:

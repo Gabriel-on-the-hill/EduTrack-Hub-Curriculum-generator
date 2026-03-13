@@ -5,7 +5,7 @@ from typing import Dict, Any, List
 # import service functions - assumes they are added to services.py
 from src.ingestion.services import list_pending_jobs, approve_ingestion_job, reject_ingestion_job
 
-router = APIRouter(prefix="/api/admin")
+router = APIRouter()
 
 @router.get("/pending_jobs")
 def pending_jobs():
