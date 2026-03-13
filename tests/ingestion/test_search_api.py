@@ -5,7 +5,7 @@ from src.ingestion.search_api import router
 from unittest.mock import patch
 
 app = FastAPI()
-app.include_router(router)
+app.include_router(router, prefix="/v1/ingest")
 client = TestClient(app)
 
 def test_search_api_results():
@@ -15,7 +15,7 @@ def test_search_api_results():
             {"title": "Test Curr", "url": "https://www.education.gov.uk/curr.pdf", "snippet": "Test", "domain": "gov.uk"}
         ]
         
-        response = client.post("/api/ingest/search", json={"query": "test"})
+        response = client.post("/v1/ingest/search", json={"query": "test"})
         assert response.status_code == 200
         data = response.json()
         assert len(data["results"]) == 1

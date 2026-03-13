@@ -4,6 +4,6 @@ from .worker import ingest_sync
 router = APIRouter()
 
 
-@router.post("/ingest")
+@router.post("")
 def ingest(url: str):
     return ingest_sync(url)
