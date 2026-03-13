@@ -1,0 +1,106 @@
+openapi: 3.1.0
+info:
+  title: EduTrack Hub Generation API
+  version: 1.0.0
+  description: Versioned contract for generation request intake.
+paths:
+  /v1/generate:
+    post:
+      summary: Validate generation request
+      operationId: postGenerateV1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerationRequest'
+      responses:
+        '200':
+          description: Request accepted and normalized.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, request]
+                properties:
+                  ok:
+                    type: boolean
+                    const: true
+                  request:
+                    $ref: '#/components/schemas/GenerationRequest'
+        '422':
+          description: Structured validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+components:
+  schemas:
+    GenerationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - curriculum_id
+        - request_type
+        - constraints
+      properties:
+        curriculum_id:
+          type: string
+          format: uuid
+        request_type:
+          type: string
+          enum:
+            - lesson_plan
+            - quiz
+            - summary
+        competency_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        constraints:
+          $ref: '#/components/schemas/GenerationConstraints'
+    GenerationConstraints:
+      type: object
+      additionalProperties: false
+      properties:
+        duration:
+          type: string
+          minLength: 1
+          nullable: true
+        offline_friendly:
+          type: boolean
+          default: false
+        difficulty_level:
+          type: string
+          minLength: 1
+          nullable: true
+        language:
+          type: string
+          minLength: 1
+          default: English
+    ValidationIssue:
+      type: object
+      required: [field, code, message]
+      properties:
+        field:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+        allowed_values:
+          type: array
+          items:
+            type: string
+    ValidationErrorResponse:
+      type: object
+      required: [error, issues]
+      properties:
+        error:
+          type: string
+          const: validation_error
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationIssue'
