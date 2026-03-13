@@ -110,6 +110,6 @@ Follow these steps to deploy your curriculum generator to `curriculum.yourwebsit
 # Install dependencies
 pip install -r requirements.txt
 
-# Run the app
-streamlit run app.py
+# Run the API
+uvicorn src.api.main:app --reload
 ```

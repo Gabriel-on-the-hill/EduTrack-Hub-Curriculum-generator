@@ -1,7 +1,7 @@
 # Phase 2 - Curriculum Hunter
 
 ## Run API
-uvicorn src.ingestion.api:router --reload
+uvicorn src.api.main:app --reload
 
 ## Run Tests
 pytest tests/ingestion
