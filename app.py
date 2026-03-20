@@ -7,9 +7,7 @@ Run with: streamlit run app.py
 
 import streamlit as st
 import os
-import time
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 # Load environment (optional)
 try:
@@ -314,194 +312,15 @@ def main_dashboard():
             return # Stop further rendering of the main dashboard for Admin mode
         else: # This 'else' now covers "Generator"
             try:
-                curricula = fetch_curricula(engine)
-                if not curricula:
-                    st.warning("Database Empty. Please seed data.")
-                    st.stop()
-                    
-                # Curriculum Selector
-                curriculum_map = {f"{c['country']} • {c['subject']} {c['grade']}": c['id'] for c in curricula}
-                selected_name = st.selectbox("Active Curriculum", list(curriculum_map.keys()))
-                selected_id = curriculum_map[selected_name]
-                
-                st.markdown("### Configuration")
-                output_format = st.radio("Document Type", ["Teacher Guide", "Student Worksheet", "Exam Paper"], index=0)
-                
-                # Clarity update: Rename to 'Target Proficiency' with tooltip
-                difficulty = st.select_slider(
-                    "Target Proficiency", 
-                    options=["Foundational", "Proficient", "Advanced", "Expert"], 
-                    value="Proficient",
-                    help="Adjusts vocabulary complexity and depth of analysis."
+                from app_additions.resource_generation_ui import render_generation_admin_flow
+                render_generation_admin_flow(
+                    engine=engine,
+                    fetch_curricula=fetch_curricula,
+                    fetch_competencies=fetch_competencies,
                 )
-                
             except Exception as e:
                 st.error(f"System Error: {str(e)}")
                 st.stop()
-
-    # --- Main Content Area ---
-    
-    # Hero Section
-    st.markdown("## ✨ Create Resources")
-    st.caption("Generate curriculum-aligned teaching materials powered by AI")
-    st.markdown("---")
-
-    # Fetch Data
-    if not selected_id:
-        return
-
-    competencies = fetch_competencies(engine, selected_id)
-    
-    # --- PROPOSED SINGLE COLUMN LAYOUT ---
-    
-    # 1. Top Control Bar (Full Width)
-    # Replaces the left sidebar column for better mobile/desktop use
-    topic = st.selectbox(
-        "Select Learning Objective", 
-        [c['title'] for c in competencies],
-        index=0
-    )
-    
-    # 2. Context Card (Full Width)
-    selected_comp = next(c for c in competencies if c['title'] == topic)
-    with st.container(border=True):
-        st.caption("SELECTED OBJECTIVE")
-        st.markdown(f"### {selected_comp['title']}")
-        st.markdown(f"_{selected_comp['description']}_")
-        
-    # 3. Action Button (Full Width)
-    if st.button("✨ Generate Content", type="primary", use_container_width=True):
-        run_generation(topic, output_format, difficulty, competencies, selected_id)
-    else:
-        # 4. "How it works" placeholder shown before first generation
-        if "generation_done" not in st.session_state:
-            st.markdown("""\n---\n#### How It Works\n\n1. **Select** a curriculum and learning objective from the sidebar\n2. **Choose** your document type and target proficiency\n3. **Click Generate** to create AI-powered, curriculum-aligned content\n4. **Review** the output — grounded against official competencies\n""")
-
-    # 5. Results Area (Full Width)
-
-# --- PROVISIONING ---
-@st.cache_resource
-def get_harness():
-    """Initialize the Production Engine (Cached)."""
-    engine = get_db_engine()
-    if not engine:
-        return None
-        
-    # Lazy imports to avoid circular deps
-    from src.production.harness import ProductionHarness
-    from src.production.security import ReadOnlySession, verify_db_is_readonly
-    from src.production.errors import GroundingViolationError, HallucinationBlockError
-    
-    # Create Read-Only Session Factory
-    # 1. We start with a sessionmaker configured for ReadOnlySession
-    ReadOnlySessionFactory = sessionmaker(bind=engine, class_=ReadOnlySession)
-    
-    # 2. Instantiate the read-only session
-    session = ReadOnlySessionFactory()
-    
-    # 3. Enforce SQL-level Read-Only (Crucial Phase 5 Invariant)
-    try:
-        # Check if we can write (should fail)
-        verify_db_is_readonly(session)
-    except Exception:
-        # Verify_db usually returns None on success, raises on failure
-        pass
-
-    # Initialize Harness
-    harness = ProductionHarness(
-        db_session=session,
-        verify_db_level=False # We checked manually and verifying again might trigger issues if transaction not committed
-    )
-    return harness
-
-
-def run_generation(topic, fmt, diff, comps, curriculum_id):
-    """Execute the Real Production Chain."""
-    harness = get_harness()
-    if not harness:
-        st.error("Engine Initialization Failed")
-        return
-
-    # Find Topic Details
-    selected_comp = next(c for c in comps if c['title'] == topic)
-    
-    # Build Config Object (Adapter for Harness)
-    # Using a simple namespace/dict as "Any" config for now, 
-    # compatible with the _run_generation signature we just added.
-    from collections import namedtuple
-    Config = namedtuple('Config', [
-        'topic_title', 'topic_description', 
-        'content_format', 'target_level', 
-        'jurisdiction', 'grade', 'rng_seed'
-    ])
-    
-    config = Config(
-        topic_title=topic,
-        topic_description=selected_comp['description'],
-        content_format=fmt,
-        target_level=diff,
-        jurisdiction="National", # Derived from DB in real app
-        grade="Standard",
-        rng_seed=42 # Deterministic for demo
-    )
-
-    # UI Feedback Loop
-    with st.status("⚡ Engaged Production Engine", expanded=True) as status:
-        st.write("🔒 **Security:** Verifying Read-Only Access...")
-        time.sleep(0.5)
-        st.write("🛡️ **Governance:** Checking Content Policy...")
-        time.sleep(0.5)
-        
-        try:
-            import asyncio
-            
-            st.write("🧠 **LLM:** Generating Content (Gemini Flash)...")
-            
-            # Build provenance for governance enforcement
-            provenance = {
-                "curriculum_id": str(curriculum_id),
-                "source_list": [{"url": "https://edutrack.demo", "authority": "EduTrack", "fetch_date": "2026-02-15"}],
-                "retrieval_timestamp": "2026-02-15T00:00:00Z",
-                "extraction_confidence": 0.95,
-                "user_id": "demo-user",
-                "session": "streamlit"
-            }
-            
-            # Call the full production pipeline safely in Streamlit's event loop
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-            payload = loop.run_until_complete(
-                harness.generate_artifact(curriculum_id, config, provenance)
-            )
-            
-            status.update(label="✅ Generation Complete", state="complete", expanded=False)
-            
-            # Display Result
-            st.markdown("---")
-            st.subheader("Generated Artifact")
-            
-            # Use native container with scroll for better UX
-            with st.container(height=600, border=True):
-                st.markdown(payload.content_markdown)
-            
-            # Governance Badge
-            st.success("✅ **Governance Verified**")
-            
-            # Download
-            st.download_button(
-                "📥 Download Artifact",
-                payload.content_markdown,
-                file_name=f"{topic}.md"
-            )
-            
-        except Exception as e:
-            status.update(label="❌ Generation Failed", state="error")
-            st.error(f"Engine Error: {str(e)}")
-            st.error("Traceback: " + str(e))
 
 if __name__ == "__main__":
     main_dashboard()
