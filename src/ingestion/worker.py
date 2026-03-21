@@ -10,8 +10,11 @@ from .extractor import heuristic_extract
 from .standardizer import standardize_batch
 from .tagger import predict_metadata
 from .services import (
-    store_snapshot, persist_job_pending, store_curriculum_and_chunks,
-    init_db
+    create_ingestion_job,
+    init_db,
+    store_snapshot,
+    store_curriculum_and_chunks,
+    update_ingestion_job,
 )
 from .schemas import ExtractorOutput
 
@@ -20,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Mock for status marking since we don't have the job table wired fully in prev steps
 def mark_job_status(job_id, source_url, requested_by, status, reason=None):
     logger.info(f"JOB STATUS: {job_id} -> {status} ({reason})")
+    update_ingestion_job(job_id, status=status, reason=reason)
 
 def enqueue_embedding_job(curriculum_id):
     logger.info(f"Enqueuing embedding for {curriculum_id}")
@@ -30,6 +34,7 @@ def ingest_sync(url: str, requested_by: str = "system", job_id: str | None = Non
     logger.info("Starting ingest job %s for %s", job_id, url)
     
     init_db()
+    create_ingestion_job(url=url, requested_by=requested_by, job_id=job_id)
 
     # Persist job entry
     try:
@@ -60,7 +65,14 @@ def ingest_sync(url: str, requested_by: str = "system", job_id: str | None = Non
         if decision["status"] == "rejected":
              # Adapt decision to object if needed, using dict for now as per Phase 2
             mark_job_status(job_id, url, requested_by, status="pending_manual_review", reason=decision.get("reason"))
-            return {"status": "pending_manual_review", "reason": decision.get("reason")}
+            result = {"status": "pending_manual_review", "reason": decision.get("reason"), "job_id": job_id}
+            update_ingestion_job(
+                job_id,
+                status="pending_manual_review",
+                reason=decision.get("reason"),
+                result_payload=result,
+            )
+            return result
 
         # 3. Extract structured competencies (Architect)
         # Using Phase 2 heuristic_extract which returns List[ExtractedCompetency]
@@ -101,16 +113,21 @@ def ingest_sync(url: str, requested_by: str = "system", job_id: str | None = Non
         enqueue_embedding_job(curriculum_id)
 
         mark_job_status(job_id, url, requested_by, status="success")
-        return {
+        result = {
             "status": "success", 
+            "job_id": job_id,
             "curriculum_id": curriculum_id,
             "competencies": len(competencies),
             "standardized": len(standardized_list)
         }
+        update_ingestion_job(job_id, status="success", result_payload=result)
+        return result
     except Exception as e:
         logger.exception("Ingest job failed: %s", e)
         mark_job_status(job_id, url, requested_by, status="failed", reason=str(e))
-        return {"status": "failed", "reason": str(e)}
+        result = {"status": "failed", "reason": str(e), "job_id": job_id}
+        update_ingestion_job(job_id, status="failed", reason=str(e), result_payload=result)
+        return result
 
 def enqueue_ingest_job(url: str, requested_by: str):
     """
@@ -122,4 +139,3 @@ def enqueue_ingest_job(url: str, requested_by: str):
     logger.info(f"ENQUEUEING JOB: {url} requested by {requested_by}")
     # For demo purposes, we can try to run it immediately or just leave it logged.
     # ingest_sync(url, requested_by) 
-
