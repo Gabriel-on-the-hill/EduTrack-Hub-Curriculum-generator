@@ -144,6 +144,24 @@ class SyntheticCurriculumConfig(BaseModel):
     # Educational configuration
     grade: str = Field(default="Grade 9", description="Grade level")
     subject: str = Field(default="Science", description="Subject area")
+
+    # Generation fields (used by ProductionHarness prompt templates)
+    topic_title: str | None = Field(
+        default=None,
+        description="Topic title for generation prompts. Falls back to subject if not set."
+    )
+    topic_description: str | None = Field(
+        default=None,
+        description="Learning objective description for generation prompts."
+    )
+    content_format: str = Field(
+        default="lesson_plan",
+        description="Output format: lesson_plan, quiz, or summary"
+    )
+    target_level: str = Field(
+        default="intermediate",
+        description="Target proficiency level for generated content"
+    )
     
     # Noise configuration
     ocr_noise: NoiseLevel = Field(

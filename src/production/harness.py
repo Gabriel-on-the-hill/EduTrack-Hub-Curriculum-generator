@@ -217,22 +217,29 @@ class ProductionHarness:
         
         # Construct Prompt
         # Note: In a real system, we'd use a Prompt Registry (Blueprint Section 14)
+        topic = getattr(config, "topic_title", None) or getattr(config, "subject", "Unknown")
+        description = getattr(config, "topic_description", None) or f"{getattr(config, 'content_format', 'lesson_plan')} for {topic}"
+        content_format = getattr(config, "content_format", "lesson_plan")
+        target_level = getattr(config, "target_level", "intermediate")
+        jurisdiction = getattr(config, "jurisdiction", "national")
+        grade = getattr(config, "grade", "Unknown")
+
         prompt = f"""
-        ACT AS: Expert Curriculum Designer ({config.jurisdiction} Standards)
+        ACT AS: Expert Curriculum Designer ({jurisdiction} Standards)
         TASK: Generate educational content.
-        
+
         CONTEXT:
         - Curriculum ID: {c_id}
-        - Topic: {config.topic_title}
-        - Learning Objective: {config.topic_description}
-        - Format: {config.content_format}
-        - Target Proficiency: {config.target_level}
-        
+        - Topic: {topic}
+        - Learning Objective: {description}
+        - Format: {content_format}
+        - Target Proficiency: {target_level}
+
         REQUIREMENTS:
         1. create a valid Markdown document.
-        2. Ensure tone is appropriate for {config.grade} students/teachers.
+        2. Ensure tone is appropriate for {grade} students/teachers.
         3. STRICTLY adhere to the learning objective.
-        
+
         OUTPUT:
         Return ONLY the Markdown content.
         """
@@ -271,13 +278,16 @@ class ProductionHarness:
         from src.utils.gemini_client import get_gemini_client, GeminiModel
         client = get_gemini_client()
         
+        topic = getattr(config, "topic_title", None) or getattr(config, "subject", "Unknown")
+        description = getattr(config, "topic_description", None) or f"{getattr(config, 'content_format', 'lesson_plan')} for {topic}"
+
         prompt = f"""
         ACT AS: Adversarial Reviewer / Shadow Model
-        
+
         TASK: Generate the SAME content for comparison.
-        Topic: {config.topic_title}
-        Objective: {config.topic_description}
-        
+        Topic: {topic}
+        Objective: {description}
+
         OUTPUT: Markdown.
         """
         

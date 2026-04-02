@@ -28,6 +28,33 @@ class Base(DeclarativeBase):
     pass
 
 
+class Curriculum(Base):
+    __tablename__ = "curricula"
+
+    id = Column(String, primary_key=True)
+    country = Column(String, default="")
+    country_code = Column(String, default="")
+    jurisdiction_level = Column(String, default="national")
+    jurisdiction_name = Column(String, nullable=True)
+    grade = Column(String, default="")
+    subject = Column(String, default="")
+    status = Column(String, default="active")
+    confidence_score = Column(String, default="0.0")  # stored as text in SQLite
+    source_url = Column(String, nullable=True)
+    source_authority = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Competency(Base):
+    __tablename__ = "competencies"
+
+    id = Column(String, primary_key=True)
+    curriculum_id = Column(String)
+    title = Column(String, default="")
+    description = Column(Text, default="")
+    order_index = Column(Integer, default=0)
+
+
 class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
 
@@ -48,6 +75,34 @@ class CurriculumChunk(Base):
 
 def init_db():
     Base.metadata.create_all(get_engine())
+
+
+def migrate_db():
+    """Add missing columns to existing tables (safe for SQLite)."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        # Get existing columns for curricula
+        try:
+            existing = conn.execute(text("PRAGMA table_info(curricula)")).fetchall()
+            existing_names = {row[1] for row in existing}
+        except Exception:
+            existing_names = set()
+
+        migrations = {
+            "country_code": "ALTER TABLE curricula ADD COLUMN country_code TEXT DEFAULT ''",
+            "jurisdiction_level": "ALTER TABLE curricula ADD COLUMN jurisdiction_level TEXT DEFAULT 'national'",
+            "jurisdiction_name": "ALTER TABLE curricula ADD COLUMN jurisdiction_name TEXT",
+            "confidence_score": "ALTER TABLE curricula ADD COLUMN confidence_score TEXT DEFAULT '0.0'",
+            "source_url": "ALTER TABLE curricula ADD COLUMN source_url TEXT",
+            "created_at": "ALTER TABLE curricula ADD COLUMN created_at DATETIME",
+        }
+
+        for col_name, ddl in migrations.items():
+            if col_name not in existing_names:
+                try:
+                    conn.execute(text(ddl))
+                except Exception:
+                    pass  # Column may already exist in non-SQLite DBs
 
 
 def persist_job_pending(url: str):
