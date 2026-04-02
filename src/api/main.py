@@ -35,6 +35,18 @@ app = FastAPI(
     description="Curriculum discovery and content generation service",
 )
 
+
+@app.on_event("startup")
+async def on_startup():
+    """Run DB migrations on startup so the app works against any DB state."""
+    from src.ingestion.services import migrate_db
+    try:
+        migrate_db()
+        logger.info("DB migration completed on startup")
+    except Exception as e:
+        logger.warning("DB migration skipped (non-SQLite or already up to date): %s", e)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.getenv("HUB_ORIGIN", "http://localhost:3000")],
