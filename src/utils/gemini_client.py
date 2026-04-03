@@ -524,44 +524,120 @@ class GeminiClient:
 
 
 # =============================================================================
+# FALLBACK CLIENT — tries primary provider, auto-switches on quota errors
+# =============================================================================
+
+def _is_quota_error(e: Exception) -> bool:
+    """Return True if the exception looks like a quota or rate-limit error."""
+    msg = str(e).lower()
+    return any(k in msg for k in ("429", "quota", "rate limit", "rate_limit", "exceeded", "resource_exhausted"))
+
+
+class FallbackAIClient:
+    """
+    Wraps two AI clients. Tries the primary on every call.
+    On a quota / rate-limit error, transparently retries with the secondary.
+    If the secondary also fails, raises the original error.
+    """
+
+    def __init__(
+        self,
+        primary: GeminiClient | OpenRouterClient,
+        secondary: GeminiClient | OpenRouterClient,
+    ) -> None:
+        self._primary = primary
+        self._secondary = secondary
+        self._primary_name = primary.get_usage_stats()["provider"]
+        self._secondary_name = secondary.get_usage_stats()["provider"]
+
+    async def generate_text(self, prompt: str, model: GeminiModel = GeminiModel.FLASH, temperature: float = 0.7) -> str:
+        try:
+            return await self._primary.generate_text(prompt, model=model, temperature=temperature)
+        except Exception as e:
+            if _is_quota_error(e):
+                logger.warning(
+                    "%s quota/rate error — falling back to %s: %s",
+                    self._primary_name, self._secondary_name, e,
+                )
+                return await self._secondary.generate_text(prompt, model=model, temperature=temperature)
+            raise
+
+    async def generate_structured(self, prompt: str, response_schema: type[T], model: GeminiModel = GeminiModel.FLASH, temperature: float = 0.1, max_retries: int = 3) -> T:
+        try:
+            return await self._primary.generate_structured(prompt, response_schema, model=model, temperature=temperature, max_retries=max_retries)
+        except Exception as e:
+            if _is_quota_error(e):
+                logger.warning(
+                    "%s quota/rate error — falling back to %s: %s",
+                    self._primary_name, self._secondary_name, e,
+                )
+                return await self._secondary.generate_structured(prompt, response_schema, model=model, temperature=temperature, max_retries=max_retries)
+            raise
+
+    def select_model_for_tier(self, tier: FallbackTier) -> GeminiModel:
+        return self._primary.select_model_for_tier(tier)
+
+    def get_usage_stats(self) -> dict[str, Any]:
+        return {
+            "primary": self._primary.get_usage_stats(),
+            "secondary": self._secondary.get_usage_stats(),
+            "provider": f"{self._primary_name}+{self._secondary_name}",
+        }
+
+
+# =============================================================================
 # CLIENT FACTORY
 # =============================================================================
 
 # Global client instance
-_client: GeminiClient | OpenRouterClient | None = None
+_client: GeminiClient | OpenRouterClient | FallbackAIClient | None = None
 
 
-def get_gemini_client() -> GeminiClient | OpenRouterClient:
+def get_gemini_client() -> GeminiClient | OpenRouterClient | FallbackAIClient:
     """
     Get or create the global AI client.
-    
-    Selects provider based on AI_PROVIDER setting:
-    - "openrouter" → OpenRouterClient (free models via openrouter.ai)
-    - "gemini" (default) → GeminiClient (Google Gemini API)
-    
-    Checks Streamlit secrets first, then env vars.
+
+    - Both keys present → FallbackAIClient (primary = AI_PROVIDER, secondary = the other)
+    - Only Gemini key → GeminiClient
+    - Only OpenRouter key → OpenRouterClient
+    - AI_PROVIDER="openrouter" with both keys → OpenRouter primary, Gemini secondary
     """
     global _client
-    if _client is None:
-        provider = None
-        
-        # Check Streamlit secrets first
+    if _client is not None:
+        return _client
+
+    provider = None
+    try:
+        import streamlit as st
+        provider = st.secrets.get("AI_PROVIDER")
+    except Exception:
+        pass
+    if not provider:
+        provider = os.getenv("AI_PROVIDER", "gemini")
+    provider = provider.lower().strip()
+
+    has_gemini = bool(os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_AI_API_KEY"))
+    has_openrouter = bool(os.getenv("OPENROUTER_API_KEY"))
+
+    if has_gemini and has_openrouter:
+        # Both keys available — build a fallback pair
         try:
-            import streamlit as st
-            provider = st.secrets.get("AI_PROVIDER")
-        except Exception:
-            pass
-        
-        # Fallback to env var
-        if not provider:
-            provider = os.getenv("AI_PROVIDER", "gemini")
-        
-        provider = provider.lower().strip()
-        
-        if provider == "openrouter":
-            logger.info("Using OpenRouter AI provider")
-            _client = OpenRouterClient()
-        else:
-            logger.info("Using Gemini AI provider")
-            _client = GeminiClient()
+            gemini = GeminiClient()
+            openrouter = OpenRouterClient()
+            if provider == "openrouter":
+                _client = FallbackAIClient(primary=openrouter, secondary=gemini)
+                logger.info("AI: OpenRouter primary, Gemini fallback")
+            else:
+                _client = FallbackAIClient(primary=gemini, secondary=openrouter)
+                logger.info("AI: Gemini primary, OpenRouter fallback")
+        except Exception as e:
+            logger.warning("Could not build fallback client (%s), using single provider", e)
+            _client = OpenRouterClient() if provider == "openrouter" else GeminiClient()
+    elif has_openrouter:
+        logger.info("AI: OpenRouter only")
+        _client = OpenRouterClient()
+    else:
+        logger.info("AI: Gemini only")
+        _client = GeminiClient()
+
     return _client

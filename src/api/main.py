@@ -15,6 +15,13 @@ import logging
 import os
 from uuid import uuid4
 
+# Load .env file if present (must happen before os.getenv calls)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -212,7 +219,7 @@ async def generate_content(request: GenerateRequest):
         gen_config = SyntheticCurriculumConfig(
             synthetic_id=f"hub-{request.curriculum_id}",
             country=metadata.get("country", "Unknown"),
-            country_code=metadata.get("country_code", "XX"),
+            country_code=metadata.get("country_code") or "XX",
             jurisdiction=metadata.get("jurisdiction_level", "national"),
             grade=metadata.get("grade", "Unknown"),
             subject=metadata.get("subject", "Unknown"),
