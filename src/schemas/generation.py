@@ -68,6 +68,30 @@ class GenerationRequest(BaseModel):
         default_factory=GenerationConstraints,
         description="Optional constraints for generation"
     )
+    client_request_id: NonEmptyStr = Field(
+        description="Client-provided idempotency key for safe retries"
+    )
+
+    @model_validator(mode="after")
+    def enforce_request_type_field_combinations(self) -> "GenerationRequest":
+        """Reject invalid request_type/field combinations."""
+        if self.request_type == GenerationRequestType.QUIZ:
+            if not self.competency_ids:
+                raise ValueError(
+                    "request_type='quiz' requires at least one competency_id"
+                )
+            if self.constraints.duration is not None:
+                raise ValueError(
+                    "constraints.duration is not supported for request_type='quiz'"
+                )
+
+        if self.request_type == GenerationRequestType.SUMMARY:
+            if self.constraints.duration is not None:
+                raise ValueError(
+                    "constraints.duration is only supported for request_type='lesson_plan'"
+                )
+
+        return self
 
     model_config = {
         "json_schema_extra": {
@@ -75,6 +99,7 @@ class GenerationRequest(BaseModel):
                 {
                     "curriculum_id": "987e6543-e21b-12d3-a456-426614174000",
                     "request_type": "lesson_plan",
+                    "client_request_id": "req_9b9d0063",
                     "constraints": {
                         "duration": "45 minutes",
                         "offline_friendly": True
@@ -83,6 +108,36 @@ class GenerationRequest(BaseModel):
             ]
         }
     }
+
+
+class GenerationJobAck(BaseModel):
+    """Asynchronous generation acknowledgement response."""
+
+    job_id: UUID = Field(description="Identifier for the enqueued generation job")
+    status: str = Field(description="Queue status", pattern=r"^queued$")
+    poll_url: NonEmptyStr = Field(description="URL for polling job status")
+
+
+class GenerationJobStatus(BaseModel):
+    """Job status polling response payload."""
+
+    job_id: UUID = Field(description="Identifier of the generation job")
+    status: str = Field(
+        description="Current job status",
+        pattern=r"^(queued|running|succeeded|failed)$",
+    )
+
+
+class ErrorEnvelope(BaseModel):
+    """Standard API error envelope."""
+
+    code: NonEmptyStr = Field(description="Stable machine-readable error code")
+    message: NonEmptyStr = Field(description="Human-readable error message")
+    retryable: bool = Field(description="Whether the request can be retried safely")
+    details: dict[str, str | int | float | bool | None] | list[str] | str | None = Field(
+        default=None,
+        description="Optional structured context for debugging",
+    )
 
 
 # =============================================================================
