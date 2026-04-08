@@ -11,6 +11,8 @@ import time
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+from src.app_additions.generation_mapping import HubMappingError, map_ui_request_type
+
 # Load environment (optional)
 try:
     from dotenv import load_dotenv
@@ -422,6 +424,13 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
         st.error("Engine Initialization Failed")
         return
 
+    try:
+        backend_request_type = map_ui_request_type(fmt)
+    except HubMappingError as err:
+        st.error("422 Unprocessable Entity")
+        st.json(err.to_422_detail())
+        return
+
     # Find Topic Details
     selected_comp = next(c for c in comps if c['title'] == topic)
     
@@ -438,7 +447,7 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
     config = Config(
         topic_title=topic,
         topic_description=selected_comp['description'],
-        content_format=fmt,
+        content_format=backend_request_type.value,
         target_level=diff,
         jurisdiction="National", # Derived from DB in real app
         grade="Standard",
