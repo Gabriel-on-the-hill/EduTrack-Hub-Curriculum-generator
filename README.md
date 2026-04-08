@@ -2,6 +2,11 @@
 
 A curriculum intelligence engine that fetches, validates, and generates educational content from official curricula.
 
+## Terminology
+
+- **Hub** refers to the separate `edutrack-hub` repository, which contains the Next.js web application.
+- **Engine/Generator** refers to this repository (`EduTrack-Hub-Curriculum-generator`), which contains the Python curriculum-generation and orchestration stack.
+
 ## Quick Start
 
 ```bash
