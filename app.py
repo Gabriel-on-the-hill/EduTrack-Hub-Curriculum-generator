@@ -8,8 +8,10 @@ Run with: streamlit run app.py
 import streamlit as st
 import os
 import time
+from datetime import datetime, timezone
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from uuid import uuid4
 
 # Load environment (optional)
 try:
@@ -424,6 +426,8 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
 
     # Find Topic Details
     selected_comp = next(c for c in comps if c['title'] == topic)
+    generation_job_id = str(uuid4())
+    generation_timestamp = datetime.now(tz=timezone.utc).isoformat()
     
     # Build Config Object (Adapter for Harness)
     # Using a simple namespace/dict as "Any" config for now, 
@@ -461,10 +465,11 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
             provenance = {
                 "curriculum_id": str(curriculum_id),
                 "source_list": [{"url": "https://edutrack.demo", "authority": "EduTrack", "fetch_date": "2026-02-15"}],
-                "retrieval_timestamp": "2026-02-15T00:00:00Z",
+                "retrieval_timestamp": generation_timestamp,
                 "extraction_confidence": 0.95,
                 "user_id": "demo-user",
-                "session": "streamlit"
+                "session": "streamlit",
+                "job_id": generation_job_id,
             }
             
             # Call the full production pipeline safely in Streamlit's event loop
@@ -477,6 +482,34 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
             payload = loop.run_until_complete(
                 harness.generate_artifact(curriculum_id, config, provenance)
             )
+
+            from src.production.resource_storage import (
+                build_hub_resource_citations,
+                build_hub_source_attribution,
+                persist_hub_resource_output,
+            )
+
+            competency_ids = [str(selected_comp["id"])]
+            citations = build_hub_resource_citations(
+                competency_ids=competency_ids,
+                source_list=provenance["source_list"],
+            )
+            source_attribution = build_hub_source_attribution(provenance["source_list"])
+            save_result = persist_hub_resource_output(
+                content=payload.content_markdown,
+                curriculum_id=str(curriculum_id),
+                competency_ids=competency_ids,
+                citations=citations,
+                source_attribution=source_attribution,
+                generation_timestamp=generation_timestamp,
+                job_id=generation_job_id,
+            )
+            st.session_state["last_saved_hub_resource"] = {
+                "curriculum_id": str(curriculum_id),
+                "competency_ids": competency_ids,
+                "output_id": save_result["output_id"],
+                "storage_path": save_result["storage_path"],
+            }
             
             status.update(label="✅ Generation Complete", state="complete", expanded=False)
             
@@ -490,6 +523,14 @@ def run_generation(topic, fmt, diff, comps, curriculum_id):
             
             # Governance Badge
             st.success("✅ **Governance Verified**")
+            if save_result["created"]:
+                st.caption(
+                    f"Saved to Hub Resource storage • Output ID: {save_result['output_id']}"
+                )
+            else:
+                st.caption(
+                    f"Hub Resource already saved • Reused Output ID: {save_result['output_id']}"
+                )
             
             # Download
             st.download_button(
