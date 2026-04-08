@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from cachetools import TTLCache, cached
+from cachetools import TTLCache
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import requests
 from src.ingestion.search import search_web
 from src.ingestion.gatekeeper import infer_authority
+from src.security import validate_signed_request
 
 router = APIRouter()
 
@@ -21,7 +22,7 @@ class SearchRequest(BaseModel):
 
 @router.post("/api/ingest/search")
 @limiter.limit("5/minute")
-def search(request: Request, req: SearchRequest):
+def search(request: Request, req: SearchRequest, _: None = Depends(validate_signed_request)):
     # Check cache manually or use decorator
     if req.query in search_cache:
         return {"results": search_cache[req.query]}
@@ -41,7 +42,7 @@ def search(request: Request, req: SearchRequest):
 
 @router.get("/api/ingest/preview")
 @limiter.limit("10/minute")
-def preview(request: Request, url: str):
+def preview(request: Request, url: str, _: None = Depends(validate_signed_request)):
     try:
         # User-agent to avoid immediate blocking
         headers = {"User-Agent": "Mozilla/5.0 (compatible; EduTrackBot/1.0)"}
@@ -70,3 +71,8 @@ def preview(request: Request, url: str):
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/api/ingest/health")
+def health():
+    return {"status": "ok"}
