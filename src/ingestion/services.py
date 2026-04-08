@@ -1,16 +1,9 @@
-from sqlalchemy import (
-    Column,
-    Integer,
-    String,
-    Text,
-    DateTime,
-    create_engine,
-    JSON,
-)
+from sqlalchemy import Column, DateTime, Integer, JSON, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from datetime import datetime
 import shutil
 import os
+import json
 from typing import List, Dict, Any
 from .schemas import StandardizedCompetency, CompetencyMetadata
 
@@ -58,10 +51,14 @@ class Competency(Base):
 class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
 
-    id = Column(Integer, primary_key=True)
+    id = Column(String, primary_key=True)
     source_url = Column(String)
     status = Column(String)
+    requested_by = Column(String, default="system")
+    decision_reason = Column(Text, nullable=True)
+    result_payload = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class CurriculumChunk(Base):
@@ -106,11 +103,65 @@ def migrate_db():
 
 
 def persist_job_pending(url: str):
+    create_ingestion_job(url=url, requested_by="system")
+
+
+def create_ingestion_job(url: str, requested_by: str = "system", job_id: str | None = None) -> str:
     session = get_db_session()
-    job = IngestionJob(source_url=url, status="pending")
+    job_id = job_id or str(uuid.uuid4())
+    job = IngestionJob(
+        id=job_id,
+        source_url=url,
+        status="queued",
+        requested_by=requested_by,
+    )
     session.add(job)
     session.commit()
     session.close()
+    return job_id
+
+
+def update_ingestion_job(
+    job_id: str,
+    *,
+    status: str,
+    reason: str | None = None,
+    result_payload: Dict[str, Any] | None = None,
+) -> None:
+    session = get_db_session()
+    job = session.get(IngestionJob, job_id)
+    if job is None:
+        session.close()
+        return
+
+    job.status = status
+    job.decision_reason = reason
+    job.updated_at = datetime.utcnow()
+    if result_payload is not None:
+        job.result_payload = result_payload
+    session.commit()
+    session.close()
+
+
+def get_ingestion_job(job_id: str) -> Dict[str, Any] | None:
+    session = get_db_session()
+    job = session.get(IngestionJob, job_id)
+    if job is None:
+        session.close()
+        return None
+
+    result = {
+        "job_id": job.id,
+        "source_url": job.source_url,
+        "status": job.status,
+        "requested_by": job.requested_by,
+        "decision_reason": job.decision_reason,
+        "result_payload": job.result_payload,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+    }
+    session.close()
+    return result
 
 
 def store_snapshot(path: str) -> str:
@@ -257,7 +308,17 @@ def list_pending_jobs(limit: int = 100):
         # Check if table exists first (for robustness in dev env)
         try:
              # Basic SQL since we haven't fully defined ORM mappings for pending reason in prev steps
-             rows = conn.execute(text("SELECT id, source_url, status, created_at FROM ingestion_jobs WHERE status = 'pending_manual_review' LIMIT :limit"), {"limit": limit}).fetchall()
+             rows = conn.execute(
+                 text(
+                     """
+                     SELECT id, source_url, status, requested_by, decision_reason, created_at
+                     FROM ingestion_jobs
+                     WHERE status = 'pending_manual_review'
+                     LIMIT :limit
+                     """
+                 ),
+                 {"limit": limit},
+             ).fetchall()
         except Exception:
              return []
 
@@ -267,9 +328,9 @@ def list_pending_jobs(limit: int = 100):
             result.append({
                 "job_id": str(r[0]), # id
                 "source_url": r[1],
-                "requested_by": "system", # column missing in minimal schema
-                "decision_reason": "Manual Review Required", # column missing in minimal schema
-                "created_at": str(r[3])
+                "requested_by": r[3] or "system",
+                "decision_reason": r[4] or "Manual Review Required",
+                "created_at": str(r[5])
             })
         return result
 
